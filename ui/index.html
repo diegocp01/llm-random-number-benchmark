@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Random Number Benchmark</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+    --accent: #2a78d6; --track: #cde2fb; --empty: #efeeea; --on-accent: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+      --accent: #3987e5; --track: #184f95; --empty: #262624; --on-accent: #ffffff;
+    }
+  }
+  :root { --track: color-mix(in srgb, var(--accent) 22%, var(--surface)); --s1: #2a78d6; --s2: #eb6834; }
+  @media (prefers-color-scheme: dark) { :root { --s1: #3987e5; --s2: #d95926; } }
+
+  /* line charts */
+  .plot { position: relative; }
+  .plot svg { display: block; overflow: visible; }
+  .plot .g { stroke: var(--grid); stroke-width: 1; }
+  .plot .ax { stroke: var(--axis); stroke-width: 1; }
+  .plot .ref { stroke: var(--muted); stroke-width: 1; }
+  .plot .cross { stroke: var(--ink2); stroke-width: 1; }
+  .plot .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .plot .dot { stroke: var(--surface); stroke-width: 2; }
+  .plot .lead { stroke: var(--axis); stroke-width: 1; }
+  .plot text { font-size: 12.5px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .plot text.lb { font-size: 13.5px; fill: var(--ink2); }
+  .plot text.fh { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .keys i.sq { width: 13px; height: 11px; border-radius: 2px; }
+  :root { --e1: #86b6ef; --e2: #2a78d6; --e3: #104281; }
+  @media (prefers-color-scheme: dark) { :root { --e1: #184f95; --e2: #3987e5; --e3: #9ec5f4; } }
+  .keys { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink2); font-size: 12.5px; margin: 0 0 8px; }
+  .keys span { display: inline-flex; align-items: center; gap: 6px; }
+  .keys i, #tip .tr i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+  .panels { display: flex; gap: 24px; flex-wrap: wrap; }
+  .panel { flex: 1 1 380px; min-width: 0; }
+  .panel .pt { font-weight: 650; font-size: 13px; margin-bottom: 4px; }
+  #tip .tr { display: flex; align-items: center; gap: 7px; }
+  #tip .tr strong, #tip .tr span { display: inline; font-size: 12px; }
+  #tip .tr strong { min-width: 40px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1900px; margin: 0 auto; padding: 24px clamp(16px, 2.2vw, 44px) 48px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  h2 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
+  .sub { color: var(--ink2); margin: 0 0 14px; font-size: 13px; max-width: 78ch; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px;
+           border: 1px solid var(--axis); color: var(--ink2); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 16px; margin-bottom: 16px; }
+
+  body.only main { padding: 0; max-width: none; }
+  body.only main > * { display: none; }
+  body.only main > section.onlyshow { display: block; margin: 0; border: 0; border-radius: 0; }
+  section.solo { padding: 0; } section.solo > h2, section.solo > .sub { display: none; }
+  section.solo #share { margin: 0; border: 0; border-radius: 0; width: 100%; }
+
+  /* controls */
+  .testrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .testrow label { color: var(--ink2); font-size: 13px; }
+  .testrow .hint { color: var(--muted); font-size: 12.5px; }
+  .runrow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  button.primary { font: inherit; font-weight: 650; font-size: 15px; min-width: 170px; padding: 9px 18px;
+                   border-radius: 8px; border: 0; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+  button.primary:disabled { background: var(--grid); color: var(--muted); cursor: default; }
+  .progress { flex: 1; min-width: 240px; }
+  .meter { height: 8px; border-radius: 99px; background: var(--track); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s; }
+  .ptext { color: var(--ink2); font-size: 13px; margin-top: 6px; }
+  #message { margin-top: 12px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--axis); font-size: 13px; }
+  #message:empty { display: none; }
+  .providers { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
+  .prov { border: 1px solid var(--grid); border-radius: 8px; padding: 12px; }
+  .pname { display: flex; justify-content: space-between; gap: 8px; color: var(--ink2); font-size: 13px; }
+  .pval { font-size: 22px; font-weight: 650; margin: 2px 0 8px; }
+  .pval small { font-size: 13px; font-weight: 400; color: var(--ink2); }
+  .psub { color: var(--ink2); font-size: 12.5px; margin-top: 6px; }
+
+  /* run status */
+  .epoch { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .ebig { font-size: 30px; font-weight: 650; }
+  .esub { color: var(--ink2); font-size: 13px; }
+  .mbars { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 7px 32px; margin-bottom: 18px; }
+  .mbar { display: grid; grid-template-columns: 132px 1fr 92px; align-items: center; gap: 10px; font-size: 13px; }
+  .mbar span:last-child { color: var(--ink2); font-variant-numeric: tabular-nums; text-align: right; }
+  .qc { border: 1px solid var(--grid); border-radius: 6px; padding: 8px 10px; font-size: 13px; margin: -4px 0 16px; }
+  .qcx { margin: -10px 0 16px; padding-left: 22px; font-size: 12.5px; color: var(--ink2); } .qcx:empty { display: none; }
+  .two { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .two > div { flex: 1 1 400px; min-width: 0; }
+  .ct { font-weight: 650; font-size: 13px; margin-bottom: 4px; }
+  .cap { color: var(--ink2); font-size: 12.5px; margin: 0 0 8px; max-width: 62ch; }
+  .prompts { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 13px; }
+  .prompts div { color: var(--ink2); margin-top: 6px; } .prompts div:first-child { margin-top: 0; }
+  .prompts q { color: var(--ink); font-weight: 600; quotes: "\201c" "\201d"; }
+
+  /* summary card: a square made for screenshots */
+  #share { width: min(100%, 720px); aspect-ratio: 1 / 1; margin: 0 auto; background: var(--page); border: 1px solid var(--border);
+           border-radius: 14px; padding: 32px 36px; display: flex; flex-direction: column; }
+  .sh-k { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .sh-t { font-size: 25px; font-weight: 650; line-height: 1.2; margin: 6px 0 4px; }
+  .sh-s { color: var(--ink2); font-size: 14px; }
+  .sh-hero { display: flex; align-items: center; gap: 20px; margin: 16px 0 12px; }
+  .sh-num { font-size: 76px; font-weight: 700; line-height: 1; }
+  .sh-ht { font-size: 16.5px; line-height: 1.35; color: var(--ink2); } .sh-ht b { color: var(--ink); font-weight: 650; }
+  .sh-rows { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+  .sh-row { display: grid; grid-template-columns: 136px 1fr 84px; gap: 12px; align-items: center; font-size: 13.5px; }
+  .sh-row canvas { width: 100%; height: 22px; display: block; border-radius: 3px; }
+  .sh-row .num { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .sh-row.g { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .sh-f { color: var(--muted); font-size: 12px; margin-top: 12px; display: flex; justify-content: space-between; gap: 16px; }
+  .sh-f span:last-child { white-space: nowrap; }
+  @media (max-width: 700px) { #share { aspect-ratio: auto; padding: 20px 16px; } .sh-row { grid-template-columns: 104px 1fr 70px; } .sh-num { font-size: 56px; } }
+  table.log { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; width: 100%; }
+  table.log th { font-weight: 500; color: var(--muted); text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  table.log td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  table.log tr:last-child td { font-weight: 650; border-bottom: 0; }
+  table.log th:first-child, table.log td:first-child { text-align: left; }
+
+  /* filter row */
+  .filters { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin: 0 0 12px 2px; }
+  .filters label { color: var(--ink2); font-size: 13px; margin-right: 6px; }
+  .seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 8px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 13px; padding: 5px 12px; border: 0; background: transparent; color: var(--ink2); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--axis); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); font-weight: 600; }
+
+  /* distribution table */
+  .scroll { overflow-x: auto; }
+  #table { min-width: 940px; }
+  .row { display: grid; grid-template-columns: 176px 70px minmax(320px, 1fr) 86px 100px 124px 230px;
+         column-gap: 16px; align-items: center; min-height: 34px; }
+  .row.head { color: var(--muted); font-size: 12px; align-items: end; padding-bottom: 6px;
+              border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
+  .row.fam { margin-top: 12px; font-weight: 650; }
+  .row.ref { color: var(--ink2); }
+  .row.first { margin-top: 5px; }
+  .row .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row .eff { color: var(--ink2); }
+  .row canvas { width: 100%; height: 26px; display: block; border-radius: 3px; }
+  .row.fam canvas { height: 32px; }
+  .axisl { position: relative; height: 15px; font-variant-numeric: tabular-nums; }
+  .axisl span { position: absolute; bottom: 0; transform: translateX(-50%); }
+  .axisl span.l { transform: none; } .axisl span.r { transform: translateX(-100%); }
+  .spread { display: flex; align-items: center; gap: 8px; }
+  .sbar { position: relative; flex: 1; height: 8px; border-radius: 99px; background: var(--track); }
+  .sbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: var(--accent); }
+  .sbar b { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+  .legend { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; color: var(--ink2); font-size: 12px; margin: 0 0 14px; }
+  .lg-ramp { position: relative; width: 200px; height: 30px; }
+  .lg-ramp i { display: block; height: 10px; border-radius: 3px; }
+  .lg-ramp span { position: absolute; top: 13px; transform: translateX(-50%); color: var(--muted); }
+  .lg-key { display: inline-flex; align-items: center; gap: 6px; }
+  .lg-tick { display: inline-block; width: 2px; height: 14px; background: var(--ink); border-radius: 1px; }
+
+  /* family comparison */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { border: 1px solid var(--grid); border-radius: 8px; padding: 12px; }
+  .tile .tl { color: var(--ink2); font-size: 13px; }
+  .tile .tv { font-size: 24px; font-weight: 650; margin-top: 2px; }
+  .tile .tv.words { font-size: 17px; line-height: 1.3; padding: 3px 0; }
+  .tile .ts { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  table.mx { border-collapse: separate; border-spacing: 2px; font-size: 14.5px; width: 100%; table-layout: fixed; min-width: 860px; }
+  table.mx th:first-child { width: 170px; }
+  table.mx th { font-weight: 500; color: var(--ink2); padding: 2px 6px; text-align: right; white-space: nowrap; }
+  table.mx thead th { text-align: center; white-space: normal; vertical-align: bottom; line-height: 1.2; }
+  table.mx thead th.famh { color: var(--ink); font-weight: 650; border-bottom: 1px solid var(--axis); }
+  table.mx td { height: 50px; text-align: center; border-radius: 4px; font-variant-numeric: tabular-nums; }
+  table.mx td.diag { color: var(--muted); }
+  table.mx td.none { background: var(--empty); }
+  table.mx .gl { border-left: 10px solid var(--surface); }
+  table.mx tr.gt > * { border-top: 10px solid var(--surface); }
+
+  /* feed */
+  #feed { list-style: none; margin: 0; padding: 0; font-size: 13px; columns: 2 320px; column-gap: 32px; }
+  #feed li { display: flex; gap: 10px; padding: 2px 0; break-inside: avoid; }
+  #feed .ft { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #feed .fl { color: var(--ink2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #feed .fv { font-weight: 650; font-variant-numeric: tabular-nums; }
+  #issues { margin: 12px 0 0; padding: 0 0 0 18px; color: var(--ink2); font-size: 13px; }
+  #issues:empty { display: none; }
+  footer { color: var(--muted); font-size: 12.5px; }
+  footer a { color: var(--ink2); }
+  #tip { position: fixed; z-index: 10; pointer-events: none; display: none; background: var(--surface);
+         border: 1px solid var(--axis); border-radius: 6px; padding: 6px 9px; font-size: 12px;
+         box-shadow: 0 4px 14px rgba(0,0,0,.14); }
+  #tip strong { display: block; font-size: 14px; }
+  #tip span { color: var(--ink2); display: block; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Random Number Benchmark</h1>
+    <span class="badge" id="demo" hidden>Demo: simulated answers, not model data</span>
+  </header>
+
+  <section class="card">
+    <div class="testrow"><label>Test</label><span class="seg" id="ranges"></span><span class="hint">Each test is started by hand: pick one, then press Run.</span></div>
+    <div class="runrow">
+      <button class="primary" id="run" disabled>Run</button>
+      <div class="progress">
+        <div class="meter"><i id="pbar"></i></div>
+        <div class="ptext" id="ptext">Connecting…</div>
+      </div>
+    </div>
+    <div id="message" role="status"></div>
+    <div class="providers" id="providers"></div>
+  </section>
+
+  <section class="card">
+    <h2>Run status</h2>
+    <p class="sub">Every model is asked the same question 200 times at each effort level. A round is finished when every model has answered one more time, so "round 11" means everyone has answered at least 11 times. Round 200 is the end of the test.</p>
+    <div class="epoch"><div class="ebig" id="eround"></div><div class="esub" id="esub"></div></div>
+    <div class="mbars" id="mbars"></div>
+    <div class="qc" id="qc" role="status"></div><ul class="qcx" id="qcx"></ul>
+    <div class="two">
+      <div><div class="ct">How varied are the answers so far?</div><p class="cap">Top of the chart = every number picked equally often (truly random). Bottom = the same number every time. One point per finished round; the lines stop moving once there is enough data.</p><div class="keys" id="convkeys"></div><div class="plot" id="conv"></div></div>
+      <div><div class="ct">Round log</div><p class="cap">The same numbers as text, one line per round. "Spread" is the chart value. "Same fam." and "Cross fam." say how differently two models answer when they are from the same family or from different ones (0 = identical).</p><div class="scroll"><table class="log" id="elog"></table></div></div>
+    </div>
+  </section>
+
+  <div class="filters">
+    <div><label>Compare models by</label><span class="seg" id="metrics">
+      <button data-m="jsd" aria-pressed="true">Same answers</button><button data-m="wass" aria-pressed="false">Nearby answers</button>
+    </span></div>
+  </div>
+
+  <section class="card">
+    <h2>What each model picks</h2>
+    <p class="sub">Each strip is one model at one reasoning effort. A stronger colour means that number was picked more often. A truly random picker looks like the flat top row.</p>
+    <div class="legend">
+      <div>Share of answers<div class="lg-ramp"><i id="lgramp"></i><span style="left:10%">1%</span><span style="left:22.4%">5%</span><span style="left:50%">25%</span><span style="left:94%">100%</span></div></div>
+      <div class="lg-key"><span class="lg-tick"></span>Spread a truly random picker would score with the same number of answers</div>
+    </div>
+    <div class="scroll"><div id="table"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Where each family's answers land</h2>
+    <p class="sub">All models and efforts of a family pooled into one curve. Peaks on the same numbers mean the two families share favourites; the flat line is what truly random picking gives.</p>
+    <div class="keys" id="famkeys"></div>
+    <div class="plot" id="famline"></div>
+  </section>
+
+  <section class="card">
+    <h2>Does more reasoning effort make the picks more random?</h2>
+    <p class="sub">Spread of each model's answers at low, medium and high effort (1 = every number equally likely). A line that climbs means thinking harder spreads the picks out.</p>
+    <div class="panels" id="effort"></div>
+  </section>
+
+  <section class="card">
+    <h2>How long does each answer take?</h2>
+    <p class="sub">Typical (median) time from sending the question to receiving the full reply, in seconds, at each reasoning effort. The thin line reaches the time 90% of calls finished within.</p>
+    <div class="keys" id="timekeys"></div>
+    <div class="plot" id="timing"></div>
+  </section>
+
+  <section class="card">
+    <h2>Do models from the same family pick alike?</h2>
+    <p class="sub" id="mxsub"></p>
+    <div class="tiles" id="tiles"></div>
+    <div class="scroll"><div id="matrix"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Live answers</h2>
+    <p class="sub">The prompts every model receives, and the latest replies as they arrive from the APIs.</p>
+    <div class="prompts" id="prompts"></div>
+    <ul id="feed"></ul>
+    <ul id="issues"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Summary card</h2>
+    <p class="sub">One square picture of the test selected at the top, made for a screenshot. Each strip pools a model's answers at all three efforts.</p>
+    <div id="share"></div>
+  </section>
+
+  <footer>Every call of this test (prompt, reasoning, answer) is saved to <code id="datafile"></code> as it arrives; the results of all tests go to <code id="allfile"></code>. <a href="/api/summary.csv">Download summary table (CSV)</a></footer>
+</main>
+<div id="tip"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const pct = x => (x >= 0.995 ? '100' : x >= 0.1 ? (x * 100).toFixed(0) : (x * 100).toFixed(1)) + '%';
+const money = x => '$' + x.toFixed(2);
+
+const RAMP = ['#cde2fb','#b7d3f6','#9ec5f4','#86b6ef','#6da7ec','#5598e7','#3987e5','#2a78d6','#256abf','#1c5cab','#184f95','#104281','#0d366b']
+  .map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
+const RAMP_DARK = RAMP.slice().reverse();
+const darkMQ = matchMedia('(prefers-color-scheme: dark)');
+let emptyColor = '#efeeea';
+
+function rampRGB(t) {               // t in 0..1, low -> high; recedes toward the surface in both themes
+  const r = darkMQ.matches ? RAMP_DARK : RAMP, x = Math.max(0, Math.min(1, t)) * (r.length - 1);
+  const i = Math.floor(x), f = x - i, a = r[i], b = r[Math.min(r.length - 1, i + 1)];
+  return a.map((v, c) => Math.round(v + (b[c] - v) * f));
+}
+const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+let emptyRGB = [239, 238, 234];
+function heat(share) {              // sqrt scale; the faint end fades into the empty-cell colour
+  if (share <= 0) return emptyColor;
+  const t = Math.sqrt(Math.min(1, share)), c = rampRGB(t), a = Math.min(1, 0.3 + 2.8 * t);
+  return rgb(c.map((v, i) => Math.round(emptyRGB[i] + (v - emptyRGB[i]) * a)));
+}
+const inkOn = c => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 > 0.55 ? '#0b0b0b' : '#ffffff';
+
+// ?only=<element id> shows just that card, for clean figure exports
+const URLQ = new URLSearchParams(location.search);
+if (URLQ.get('only')) {
+  const sec = (document.getElementById(URLQ.get('only')) || document.body).closest('section');
+  if (sec) { document.body.classList.add('only'); sec.classList.add('onlyshow'); if (URLQ.get('only') === 'share') sec.classList.add('solo'); }
+}
+let S = null, range = null, metric = 'jsd', sig = '', refs = {}, lastVersion = -1, lastKey = '';
+
+/* ---------- distribution strips ---------- */
+function drawStrip(cv) {
+  const d = cv._d; if (!d) return;
+  const w = cv.clientWidth, h = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (!w) return;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const nb = d.bins.length, cw = w / nb, gap = nb <= 10 ? 2 : (cw >= 4 ? 1 : 0);
+  for (let i = 0; i < nb; i++) {
+    const x0 = Math.round(i * cw), x1 = Math.round((i + 1) * cw) - gap;
+    ctx.fillStyle = heat(d.total ? d.bins[i] / d.total : 0);
+    ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h);
+    if (i === cv._hover) {
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--ink');
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x0 + .75, .75, Math.max(1, x1 - x0) - 1.5, h - 1.5);
+    }
+  }
+}
+function stripHover(e) {
+  const cv = e.currentTarget, d = cv._d; if (!d) return;
+  const r = cv.getBoundingClientRect(), nb = d.bins.length;
+  const i = Math.max(0, Math.min(nb - 1, Math.floor((e.clientX - r.left) / r.width * nb)));
+  cv._hover = i; drawStrip(cv);
+  const lo = i * d.size + 1, hi = Math.min(d.k, (i + 1) * d.size);
+  const tip = $('tip'); tip.textContent = '';
+  tip.append(el('strong', null, d.total ? pct(d.bins[i] / d.total) : 'no answers yet'),
+             el('span', null, d.size === 1 ? 'picked ' + lo : 'picked ' + lo + ' to ' + hi),
+             el('span', null, d.ideal ? 'expected share' : fmt(d.bins[i]) + ' of ' + fmt(d.total) + ' answers'));
+  tip.style.display = 'block';
+  const tw = tip.offsetWidth;
+  tip.style.left = Math.max(8, Math.min(window.innerWidth - tw - 8, e.clientX + 14)) + 'px';
+  tip.style.top = (e.clientY + 16) + 'px';
+}
+function stripLeave(e) { e.currentTarget._hover = null; drawStrip(e.currentTarget); $('tip').style.display = 'none'; }
+
+function addRow(parent, key, cls, model, effort) {
+  const row = el('div', 'row ' + (cls || ''));
+  const cv = el('canvas');
+  cv.addEventListener('pointermove', stripHover); cv.addEventListener('pointerleave', stripLeave);
+  const n = el('div', 'num'), top = el('div', 'num'), mean = el('div', 'num');
+  const spread = el('div', 'spread'), bar = el('div', 'sbar'), fill = el('i'), tick = el('b'), val = el('span', 'num');
+  bar.append(fill, tick); spread.append(bar, val);
+  row.append(el('div', null, model), el('div', 'eff', effort), cv, n, top, mean, spread);
+  parent.append(row);
+  refs[key] = { cv, n, top, mean, fill, tick, val };
+}
+
+function buildTable(view) {
+  const t = $('table'); t.textContent = ''; refs = {};
+  const head = el('div', 'row head'), axis = el('div', 'axisl');
+  const nb = Math.ceil(view.k / view.bin_size);
+  const ticks = view.k <= 12 ? Array.from({ length: view.k }, (_, i) => i + 1)
+    : [1, view.k / 4, view.k / 2, view.k * 3 / 4, view.k].map(Math.round);
+  ticks.forEach((v, i) => {
+    const s = el('span', view.k > 12 && i === 0 ? 'l' : view.k > 12 && i === ticks.length - 1 ? 'r' : '', String(v));
+    const pos = view.k > 12 && i === 0 ? 0 : view.k > 12 && i === ticks.length - 1 ? 100 : (Math.floor((v - 1) / view.bin_size) + .5) / nb * 100;
+    s.style.left = pos + '%'; axis.append(s);
+  });
+  head.append(el('div', null, 'Model'), el('div', null, 'Effort'), axis, el('div', null, 'Answers'),
+              el('div', null, 'Top pick'), el('div', null, 'Mean ± SD'), el('div', null, 'Spread (1 = fully random)'));
+  t.append(head);
+  addRow(t, 'ideal', 'ref', 'Perfectly random', '');
+  for (const fam of view.families) {
+    addRow(t, 'fam:' + fam.family, 'fam', fam.family + (fam.control ? ', pooled' : ' family, pooled'), '');
+    for (const m of fam.models) m.rows.forEach((r, i) => addRow(t, m.id + '|' + r.effort, i === 0 ? 'first' : '', i === 0 ? m.label : '', r.effort));
+  }
+}
+
+function fillRow(key, d, view) {
+  const r = refs[key]; if (!r) return;
+  const s = d.stats, dec = view.k <= 100 ? 1 : 0;
+  r.cv._d = { bins: d.bins, total: d.total != null ? d.total : s.n, size: view.bin_size, k: view.k, ideal: !!d.ideal };
+  drawStrip(r.cv);
+  if (d.disabled) { r.n.textContent = 'skipped'; r.n.title = d.disabled; }
+  else {
+    r.n.textContent = d.target != null ? d.done + '/' + d.target : (d.ideal ? '' : fmt(s.n));
+    r.n.title = d.invalid ? d.invalid + ' answers were not a valid number and are excluded' : '';
+  }
+  const has = d.ideal || s.n > 0;
+  r.top.textContent = d.ideal ? 'none' : has ? s.mode + ' · ' + pct(s.mode_share) : '';
+  r.mean.textContent = has ? s.mean.toFixed(dec) + ' ± ' + s.sd.toFixed(dec) : '';
+  r.fill.style.width = has ? (s.entropy * 100) + '%' : '0';
+  r.tick.style.display = has && !d.ideal ? '' : 'none';
+  if (has && !d.ideal) r.tick.style.left = (s.entropy_ref * 100) + '%';
+  r.val.textContent = has ? s.entropy.toFixed(2) : '';
+}
+
+function renderTable(view) {
+  const newSig = view.k + ':' + view.families.map(f => f.models.map(m => m.id + m.rows.map(r => r.effort)).join()).join();
+  if (newSig !== sig) { buildTable(view); sig = newSig; }
+  const nb = Math.ceil(view.k / view.bin_size);
+  fillRow('ideal', { ideal: true, bins: Array(nb).fill(1), total: nb,
+    stats: { mean: view.uniform.mean, sd: view.uniform.sd, entropy: 1 } }, view);
+  for (const fam of view.families) {
+    fillRow('fam:' + fam.family, fam.pooled, view);
+    for (const m of fam.models) for (const r of m.rows) fillRow(m.id + '|' + r.effort, r, view);
+  }
+}
+
+/* ---------- line charts ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+const sv = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+// GPT and Claude keep blue and orange whatever else is listed; the control is neutral grey
+function famColors(view) { let n = 0; return view.families.map(f => f.control ? 'var(--muted)' : 'var(--s' + (n++ % 2 + 1) + ')'); }
+function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
+function placeTip(e, nodes) {
+  const tip = $('tip'); tip.textContent = ''; tip.append(...nodes); tip.style.display = 'block';
+  tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8, e.clientX + 14)) + 'px';
+  tip.style.top = (e.clientY + 16) + 'px';
+}
+function tipRow(color, value, name) {
+  const r = el('div', 'tr'), k = el('i'); k.style.background = color;
+  r.append(k, el('strong', null, value), el('span', null, name)); return r;
+}
+function attachHover(box) {         // crosshair snaps to the nearest x position; one tooltip lists every series
+  box.addEventListener('pointermove', e => {
+    const g = box._g; if (!g) return;
+    box._hi = g.index(e.clientX - box.getBoundingClientRect().left); box._ev = e;
+    g.cross(box._hi); placeTip(e, g.tip(box._hi));
+  });
+  box.addEventListener('pointerleave', () => { box._hi = null; if (box._g) box._g.cross(null); $('tip').style.display = 'none'; });
+}
+function finishPlot(box, svg, g) {
+  box.textContent = ''; box.append(svg); box._g = g;
+  if (box._hi != null) { g.cross(box._hi); if ($('tip').style.display === 'block') placeTip(box._ev, g.tip(box._hi)); }
+}
+
+function renderFamLines(view) {
+  const box = $('famline'); if (!box._on) { attachHover(box); box._on = true; }
+  const fams = view.families, nb = Math.ceil(view.k / view.bin_size), uni = 1 / nb;
+  const cols = famColors(view), famColor = i => cols[i];
+  const shares = fams.map(f => { const n = f.pooled.stats.n || 0; return f.pooled.bins.map(b => n ? b / n : 0); });
+  const keys = $('famkeys'); keys.textContent = '';
+  fams.forEach((f, i) => { const s = el('span'), k = el('i'); k.style.background = famColor(i); s.append(k, f.control ? f.family + ', sampled' : f.family + ' family'); keys.append(s); });
+  { const s = el('span'), k = el('i'); k.style.cssText = 'background:var(--muted);height:1px'; s.append(k, 'truly random, in theory'); keys.append(s); }
+
+  const W = Math.max(320, box.clientWidth), H = 420, m = { l: 52, r: 18, t: 34, b: 30 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  let ymax = Math.max(uni * 1.8, ...shares.map(s => Math.max(...s)));
+  const step = niceStep(ymax / 4); ymax = Math.ceil(ymax / step - 1e-9) * step;
+  const x = i => m.l + (i + .5) / nb * pw, y = v => m.t + (1 - v / ymax) * ph;
+  const binLabel = i => view.bin_size === 1 ? String(i + 1) : (i * view.bin_size + 1) + '–' + Math.min(view.k, (i + 1) * view.bin_size);
+  const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Share of answers by number, one line per family' });
+  for (let v = 0; v <= ymax + 1e-9; v += step) {
+    svg.append(sv('line', { class: v ? 'g' : 'ax', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
+               sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, (v * 100).toFixed(step < 0.01 ? 1 : 0) + '%'));
+  }
+  const ticks = view.k <= 12 ? Array.from({ length: view.k }, (_, i) => i + 1) : [1, view.k / 4, view.k / 2, view.k * 3 / 4, view.k].map(Math.round);
+  ticks.forEach(v => svg.append(sv('text', { x: x(Math.floor((v - 1) / view.bin_size)), y: H - 8, 'text-anchor': 'middle' }, String(v))));
+  svg.append(sv('line', { class: 'ref', x1: m.l, x2: W - m.r, y1: y(uni), y2: y(uni) }));
+  const cross = sv('line', { class: 'cross', y1: m.t, y2: m.t + ph, visibility: 'hidden' }); svg.append(cross);
+  const placed = [];
+  fams.forEach((f, fi) => {
+    const s = shares[fi]; if (!f.pooled.stats.n) return;
+    svg.append(sv('path', { class: 'ln', stroke: famColor(fi), d: s.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join('') }));
+    if (nb <= 12) s.forEach((v, i) => svg.append(sv('circle', { class: 'dot', cx: x(i), cy: y(v), r: 5, fill: famColor(fi) })));
+    if (f.control) return;
+    let pk = 0; s.forEach((v, i) => { if (v > s[pk]) pk = i; });      // label only the peak
+    let lx = Math.max(m.l + 16, Math.min(W - m.r - 16, x(pk))), ly = y(s[pk]) - 9;
+    if (placed.some(p => Math.abs(p[0] - lx) < 44 && Math.abs(p[1] - ly) < 14)) ly -= 14;
+    const dup = placed.some(p => p[2] === pk);        // both families peak on the same number: one label
+    placed.push([lx, ly, pk]);
+    svg.append(sv('circle', { class: 'dot', cx: x(pk), cy: y(s[pk]), r: 5, fill: famColor(fi) }),
+               dup ? '' : sv('text', { class: 'lb', x: lx, y: ly, 'text-anchor': 'middle' }, binLabel(pk)));
+  });
+  finishPlot(box, svg, {
+    index: px => Math.max(0, Math.min(nb - 1, Math.floor((px - m.l) / pw * nb))),
+    cross: i => { if (i == null) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible'); } },
+    tip: i => [el('span', null, 'picked ' + binLabel(i).replace('–', ' to ')),
+               ...fams.map((f, fi) => tipRow(famColor(fi), f.pooled.stats.n ? pct(shares[fi][i]) : 'no data', f.family)),
+               tipRow('var(--muted)', pct(uni), 'truly random')],
+  });
+}
+
+function renderEffort(view) {
+  const host = $('effort');
+  const cols = famColors(view), famColor = i => cols[i];
+  const llm = view.families.map((f, i) => [f, i]).filter(o => !o[0].control);   // effort does not apply to the control
+  if (host.childElementCount !== llm.length) {
+    host.textContent = '';
+    llm.forEach(() => { const p = el('div', 'panel'), b = el('div', 'plot'); attachHover(b); p.append(el('div', 'pt'), b); host.append(p); });
+  }
+  llm.forEach(([fam, fi], pi) => {
+    const panel = host.children[pi], box = panel.lastChild;
+    panel.firstChild.textContent = fam.family + ' family';
+    const efforts = []; fam.models.forEach(mo => mo.rows.forEach(r => { if (!efforts.includes(r.effort)) efforts.push(r.effort); }));
+    const W = Math.max(300, box.clientWidth), H = 360, m = { l: 46, r: 150, t: 14, b: 30 };
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const series = fam.models.map(mo => ({ label: mo.label, pts: efforts.map(e => { const r = mo.rows.find(q => q.effort === e); return r && r.stats.n ? r.stats.entropy : null; }) }));
+    const refs = []; fam.models.forEach(mo => mo.rows.forEach(r => { if (r.stats.n) refs.push(r.stats.entropy_ref); }));
+    const rv = refs.length ? refs.reduce((a, b) => a + b, 0) / refs.length : null;
+    // The axis zooms to the data (a line chart needs no zero baseline); both panels share one scale.
+    const all = []; llm.forEach(([f]) => f.models.forEach(mo => mo.rows.forEach(r => { if (r.stats.n) all.push(r.stats.entropy, r.stats.entropy_ref); })));
+    let y0 = 0, y1 = 1, step = 0.25;
+    if (all.length) {
+      const lo = Math.min(...all), hi = Math.max(...all);
+      step = Math.max(0.05, niceStep((hi - lo) / 4 || 0.05));
+      y0 = Math.max(0, Math.floor((lo - step * .3) / step) * step); y1 = Math.min(1, Math.ceil((hi + step * .1) / step) * step);
+      if (y1 - y0 < step * 2) y0 = Math.max(0, y1 - step * 2);
+    }
+    const x = j => m.l + 18 + (efforts.length > 1 ? j / (efforts.length - 1) : .5) * (pw - 36), y = v => m.t + (1 - (v - y0) / (y1 - y0)) * ph;
+    const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Spread of answers by reasoning effort, ' + fam.family + ' models' });
+    for (let v = y0; v <= y1 + 1e-9; v += step) {
+      svg.append(sv('line', { class: v - y0 > 1e-9 ? 'g' : 'ax', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
+                 sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, v.toFixed(2)));
+    }
+    efforts.forEach((e, j) => svg.append(sv('text', { x: x(j), y: H - 8, 'text-anchor': 'middle' }, e)));
+    if (rv != null) {
+      svg.append(sv('line', { class: 'ref', x1: m.l, x2: W - m.r, y1: y(rv), y2: y(rv) }),
+                 sv('text', { x: m.l + 4, y: y(rv) + (y(rv) - m.t < 16 ? 13 : -5) }, 'truly random'));
+    }
+    const cross = sv('line', { class: 'cross', y1: m.t, y2: m.t + ph, visibility: 'hidden' }); svg.append(cross);
+    const ends = [];
+    series.forEach(s => {
+      const pts = s.pts.map((v, j) => v == null ? null : [x(j), y(v)]).filter(Boolean);
+      if (!pts.length) return;
+      svg.append(sv('path', { class: 'ln', stroke: famColor(fi), d: pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('') }));
+      pts.forEach(p => svg.append(sv('circle', { class: 'dot', cx: p[0], cy: p[1], r: 5, fill: famColor(fi) })));
+      ends.push({ label: s.label, px: pts[pts.length - 1][0], py: pts[pts.length - 1][1] });
+    });
+    ends.sort((a, b) => a.py - b.py);                               // end labels: keep 14px apart, joined by a leader
+    ends.forEach((e, i) => { e.ly = i ? Math.max(e.py, ends[i - 1].ly + 14) : e.py; });
+    const over = ends.length ? ends[ends.length - 1].ly - (m.t + ph) : 0;
+    if (over > 0) for (let i = ends.length - 1; i >= 0; i--) { ends[i].ly = Math.min(ends[i].ly, m.t + ph - (ends.length - 1 - i) * 14); }
+    ends.forEach(e => {
+      const lx = W - m.r + 14;
+      svg.append(sv('line', { class: 'lead', x1: e.px + 7, y1: e.py, x2: lx - 4, y2: e.ly }),
+                 sv('text', { class: 'lb', x: lx, y: e.ly + 4 }, e.label));
+    });
+    finishPlot(box, svg, {
+      index: px => { let best = 0; efforts.forEach((_, j) => { if (Math.abs(x(j) - px) < Math.abs(x(best) - px)) best = j; }); return best; },
+      cross: j => { if (j == null) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(j)); cross.setAttribute('x2', x(j)); cross.setAttribute('visibility', 'visible'); } },
+      tip: j => [el('span', null, efforts[j] + ' effort'), ...series.map(s => tipRow(famColor(fi), s.pts[j] == null ? 'no data' : s.pts[j].toFixed(2), s.label))],
+    });
+  });
+}
+
+/* ---------- run status (rounds, like epochs) ---------- */
+function renderRun(view) {
+  const T = S.tests.find(t => t.k === range), H = T.history, last = H[H.length - 1];
+  $('eround').textContent = 'Round ' + T.round + ' of ' + T.rounds;
+  $('esub').textContent = { idle: 'not started', running: 'running', pausing: 'pausing', paused: 'paused', done: 'complete' }[T.status]
+    + (last ? ' \u00b7 ' + fmt(last.calls) + ' API calls \u00b7 ' + money(last.spent) + ' spent on this test' : '');
+  const cols = famColors(view), colorOf = {}; view.families.forEach((f, i) => colorOf[f.family] = cols[i]);
+  const fams = view.families.filter(f => !f.control);
+
+  const mb = $('mbars'); mb.textContent = '';
+  fams.forEach(f => f.models.forEach(mo => {
+    const done = mo.rows.reduce((a, r) => a + r.done, 0), target = mo.rows.reduce((a, r) => a + r.target, 0);
+    const skipped = mo.rows.every(r => r.disabled);
+    const row = el('div', 'mbar'), meter = el('div', 'meter'), fill = el('i');
+    fill.style.width = (target ? done / target * 100 : 0) + '%'; fill.style.background = colorOf[f.family]; meter.append(fill);
+    row.append(el('span', null, mo.label), meter, el('span', null, skipped ? 'skipped' : fmt(done) + ' / ' + fmt(target)));
+    mb.append(row);
+  }));
+
+  const Q = T.quality, qx = $('qcx'); qx.textContent = '';
+  $('qc').textContent = !Q.total ? 'Quality check: every reply must be a number and nothing else. No replies yet.'
+    : Q.clean === Q.total ? '\u2713 Quality check passed: all ' + fmt(Q.total) + ' replies were a number and nothing else.'
+    : '\u26a0 Quality check: ' + fmt(Q.clean) + ' of ' + fmt(Q.total) + ' replies were a number and nothing else. ' + fmt(Q.extra)
+      + ' had extra text around the number (still counted) and ' + fmt(Q.unusable) + ' had no usable number (left out). Latest:';
+  Q.examples.forEach(x => qx.append(el('li', null, x.label + ' \u00b7 ' + x.effort + ': \u201c' + x.text + '\u201d (' + (x.kind === 'extra_text' ? 'extra text' : String(x.kind).replace(/_/g, ' ')) + ')')));
+
+  const log = $('elog'); log.textContent = '';
+  const hr = el('tr'); ['Round', 'Calls', ...fams.map(f => f.family + ' spread'), 'Same fam.', 'Cross fam.', 'Spent'].forEach(h => hr.append(el('th', null, h)));
+  log.append(hr);
+  const f2 = v => v == null ? '\u2013' : v.toFixed(3);
+  if (!H.length) { const tr = el('tr'), td = el('td', null, 'The first line appears when round 1 completes.'); td.colSpan = 5 + fams.length; td.style.textAlign = 'left'; td.style.fontWeight = '400'; tr.append(td); log.append(tr); }
+  H.slice(-8).forEach(h => {
+    const tr = el('tr');
+    [String(h.round), fmt(h.calls), ...fams.map(f => f2(h.spread[f.family])), f2(h.within), f2(h.between), money(h.spent)].forEach(v => tr.append(el('td', null, v)));
+    log.append(tr);
+  });
+
+  const keys = $('convkeys'); keys.textContent = '';
+  fams.forEach(f => { const s = el('span'), k = el('i'); k.style.background = colorOf[f.family]; s.append(k, f.family + ' family'); keys.append(s); });
+  const box = $('conv'); if (!box._on) { attachHover(box); box._on = true; }
+  const W = Math.max(300, box.clientWidth), HH = 320, m = { l: 46, r: 50, t: 12, b: 30 }, pw = W - m.l - m.r, ph = HH - m.t - m.b;
+  const y0 = 0, y1 = 1, step = 0.25;
+  const x = r => m.l + r / T.rounds * pw, y = v => m.t + (1 - (v - y0) / (y1 - y0)) * ph;
+  const svg = sv('svg', { width: W, height: HH, role: 'img', 'aria-label': 'Spread of answers by round, one line per family' });
+  for (let v = y0; v <= y1 + 1e-9; v += step) {
+    svg.append(sv('line', { class: v - y0 > 1e-9 ? 'g' : 'ax', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
+               sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, v.toFixed(2)));
+  }
+  [0, .25, .5, .75, 1].forEach(q => svg.append(sv('text', { x: x(q * T.rounds), y: HH - 8, 'text-anchor': 'middle' }, String(Math.round(q * T.rounds)))));
+  svg.append(sv('text', { x: W - m.r, y: y(1) + 15, 'text-anchor': 'end' }, 'truly random'));
+  const cross = sv('line', { class: 'cross', y1: m.t, y2: m.t + ph, visibility: 'hidden' }); svg.append(cross);
+  fams.forEach(f => {
+    const pts = H.filter(h => h.spread[f.family] != null).map(h => [x(h.round), y(h.spread[f.family]), h.spread[f.family]]);
+    if (!pts.length) return;
+    svg.append(sv('path', { class: 'ln', stroke: colorOf[f.family], d: pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('') }));
+    const e = pts[pts.length - 1];                                   // label only the latest value
+    svg.append(sv('circle', { class: 'dot', cx: e[0], cy: e[1], r: 5, fill: colorOf[f.family] }),
+               sv('text', { class: 'lb', x: e[0] + 8, y: e[1] + 4 }, e[2].toFixed(2)));
+  });
+  finishPlot(box, svg, {
+    index: px => { let b = 0; H.forEach((h, i) => { if (Math.abs(x(h.round) - px) < Math.abs(x(H[b].round) - px)) b = i; }); return H.length ? b : null; },
+    cross: i => { if (i == null || !H[i]) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(H[i].round)); cross.setAttribute('x2', x(H[i].round)); cross.setAttribute('visibility', 'visible'); } },
+    tip: i => !H[i] ? [el('span', null, 'no rounds yet')] : [el('span', null, 'round ' + H[i].round),
+      ...fams.map(f => tipRow(colorOf[f.family], f2(H[i].spread[f.family]), f.family + ' spread')),
+      tipRow('var(--muted)', f2(H[i].within), 'same-family distance'), tipRow('var(--muted)', f2(H[i].between), 'cross-family distance')],
+  });
+}
+
+/* ---------- response time ---------- */
+function renderTiming(view) {
+  const box = $('timing'), fams = view.families.filter(f => !f.control);
+  const efforts = []; fams.forEach(f => f.models.forEach(mo => mo.rows.forEach(r => { if (!efforts.includes(r.effort)) efforts.push(r.effort); })));
+  const ecol = e => 'var(--e' + (Math.min(efforts.indexOf(e), 2) + 1) + ')';
+  const keys = $('timekeys'); keys.textContent = '';
+  efforts.forEach(e => { const s = el('span'), k = el('i', 'sq'); k.style.background = ecol(e); s.append(k, e + ' effort'); keys.append(s); });
+  const W = Math.max(320, box.clientWidth), m = { l: 176, r: 84, t: 4, b: 32 }, bh = 16, gap = 2, mg = 18, fh = 30;
+  let max = 0, yy = m.t; const lay = [];
+  fams.forEach(f => {
+    lay.push({ head: f.family, y: yy }); yy += fh;
+    f.models.forEach(mo => {
+      lay.push({ model: mo, y: yy });
+      mo.rows.forEach(r => { if (r.time) max = Math.max(max, r.time.p90); });
+      yy += mo.rows.length * (bh + gap) - gap + mg;
+    });
+  });
+  const H = yy - mg + 14 + m.b, bottom = H - m.b;
+  const step = niceStep((max || 1) / 6), xmax = Math.ceil((max || 1) / step - 1e-9) * step;
+  const x = v => m.l + v / xmax * (W - m.l - m.r);
+  const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Median response time in seconds by model and reasoning effort' });
+  for (let v = 0; v <= xmax + 1e-9; v += step) {
+    svg.append(sv('line', { class: v ? 'g' : 'ax', x1: x(v), x2: x(v), y1: m.t, y2: bottom }),
+               sv('text', { x: x(v), y: H - 10, 'text-anchor': 'middle' }, (step < 1 ? v.toFixed(1) : v.toFixed(0)) + ' s'));
+  }
+  lay.forEach(L => {
+    if (L.head) { svg.append(sv('text', { class: 'fh', x: 0, y: L.y + 18 }, L.head)); return; }
+    const mo = L.model, n = mo.rows.length;
+    svg.append(sv('text', { class: 'lb', x: 0, y: L.y + (n * (bh + gap) - gap) / 2 + 5 }, mo.label));
+    mo.rows.forEach((r, i) => {
+      if (!r.time) return;
+      const y0 = L.y + i * (bh + gap), x0 = x(0), w = Math.max(2, x(r.time.median) - x0), rr = Math.min(4, w / 2);
+      // square at the baseline, rounded at the data end
+      svg.append(sv('path', { fill: ecol(r.effort), d: 'M' + x0 + ' ' + y0 + 'h' + (w - rr) + 'a' + rr + ' ' + rr + ' 0 0 1 ' + rr + ' ' + rr + 'v' + (bh - 2 * rr) + 'a' + rr + ' ' + rr + ' 0 0 1 ' + (-rr) + ' ' + rr + 'H' + x0 + 'Z' }));
+      const xp = x(r.time.p90);
+      if (xp > x0 + w + 2) svg.append(sv('line', { class: 'ref', x1: x0 + w, x2: xp, y1: y0 + bh / 2, y2: y0 + bh / 2 }),
+                                      sv('line', { class: 'ref', x1: xp, x2: xp, y1: y0 + 4, y2: y0 + bh - 4 }));
+      svg.append(sv('text', { class: 'lb', x: Math.max(xp, x0 + w) + 8, y: y0 + bh / 2 + 5 }, r.time.median.toFixed(2) + ' s'));
+      const hit = sv('rect', { x: x0, y: y0 - 1, width: W - x0, height: bh + 2, fill: 'transparent' });
+      hit.addEventListener('pointermove', e => placeTip(e, [el('span', null, mo.label + ' \u00b7 ' + r.effort + ' effort'),
+        el('strong', null, r.time.median.toFixed(2) + ' s typical'), el('span', null, '90% of calls within ' + r.time.p90.toFixed(2) + ' s'),
+        el('span', null, 'reasoning tokens per call: ' + r.rtok.toFixed(1))]));
+      hit.addEventListener('pointerleave', () => { $('tip').style.display = 'none'; });
+      svg.append(hit);
+    });
+  });
+  box.textContent = ''; box.append(svg);
+}
+
+/* ---------- summary card ---------- */
+let shareSig = '', sh = null;
+function renderShare(view) {
+  const box = $('share'), T = S.tests.find(t => t.k === range), nb = Math.ceil(view.k / view.bin_size);
+  const sigNow = view.k + '|' + view.families.map(f => f.family + ':' + f.models.map(m => m.id).join()).join('|');
+  if (sigNow !== shareSig) {
+    shareSig = sigNow; box.textContent = ''; sh = { rows: [] };
+    sh.title = el('div', 'sh-t'); sh.sub = el('div', 'sh-s'); sh.num = el('div', 'sh-num'); sh.ht = el('div', 'sh-ht');
+    const hero = el('div', 'sh-hero'); hero.append(sh.num, sh.ht);
+    const rows = el('div', 'sh-rows'), ax = el('div', 'sh-row g'), axis = el('div', 'axisl');
+    const ticks = view.k <= 12 ? Array.from({ length: view.k }, (_, i) => i + 1) : [1, view.k / 4, view.k / 2, view.k * 3 / 4, view.k].map(Math.round);
+    ticks.forEach((v, i) => {
+      const edge = view.k > 12 && (i === 0 || i === ticks.length - 1);
+      const t = el('span', edge ? (i ? 'r' : 'l') : '', String(v));
+      t.style.left = (edge ? (i ? 100 : 0) : (Math.floor((v - 1) / view.bin_size) + .5) / nb * 100) + '%'; axis.append(t);
+    });
+    ax.append(el('span', null, 'number picked'), axis, el('span', 'num', 'top pick')); rows.append(ax);
+    const add = (label, get) => {
+      const r = el('div', 'sh-row'), cv = el('canvas'), top = el('span', 'num');
+      cv.addEventListener('pointermove', stripHover); cv.addEventListener('pointerleave', stripLeave);
+      r.append(el('span', null, label), cv, top); rows.append(r); sh.rows.push({ cv, top, get });
+    };
+    view.families.forEach((f, fi) => {
+      if (f.control) return;
+      const g = el('div', 'sh-row g'); g.append(el('span', null, f.family)); rows.append(g);
+      f.models.forEach((m, mi) => add(m.label, v => v.families[fi].models[mi].pooled));
+    });
+    view.families.forEach((f, fi) => {
+      if (!f.control) return;
+      const g = el('div', 'sh-row g'); g.append(el('span', null, 'for comparison')); rows.append(g);
+      add('Python random', v => v.families[fi].pooled);
+    });
+    sh.foot = el('span');
+    const f = el('div', 'sh-f'); f.append(sh.foot, el('span', null, new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })));
+    box.append(el('div', 'sh-k', 'Random number benchmark'), sh.title, sh.sub, hero, rows, f);
+  }
+  const L = view.llm.stats, models = view.families.filter(f => !f.control).reduce((a, f) => a + f.models.length, 0);
+  sh.title.textContent = '\u201c' + S.prompts.main.replace('{max}', view.k) + '\u201d';
+  sh.sub.textContent = L.n ? fmt(L.n) + ' answers from ' + models + ' AI models' + (T.status === 'done' ? '' : ' so far') : 'No answers yet';
+  sh.num.textContent = L.n ? L.mode : '?';
+  sh.ht.textContent = '';
+  if (L.n) sh.ht.append(el('b', null, pct(L.mode_share) + ' of all answers were ' + L.mode + '.'), el('br'),
+                        'Truly random picking would give ' + pct(1 / view.k) + '.');
+  sh.rows.forEach(r => {
+    const d = r.get(view), s = d.stats;
+    r.cv._d = { bins: d.bins, total: s.n, size: view.bin_size, k: view.k };
+    drawStrip(r.cv);
+    r.top.textContent = s.n ? s.mode + ' \u00b7 ' + pct(s.mode_share) : '';
+  });
+  sh.foot.textContent = 'Same question, a fresh conversation every time, at low, medium and high reasoning effort. Stronger colour = picked more often.';
+}
+
+/* ---------- family comparison ---------- */
+function tile(label, value, sub, words) {
+  const t = el('div', 'tile');
+  t.append(el('div', 'tl', label), el('div', 'tv' + (words ? ' words' : ''), value), el('div', 'ts', sub));
+  return t;
+}
+function renderMatrix(view) {
+  const m = view.matrix, D = m[metric], n = m.labels.length, test = m.test[metric];
+  $('mxsub').textContent = (metric === 'jsd'
+    ? 'Distance between two models’ answer distributions, all efforts pooled (Jensen–Shannon divergence: 0 = identical, 1 = no overlap' + (view.bin_size > 1 ? '; answers grouped in bins of ' + view.bin_size : '') + ').'
+    : 'Distance between two models’ answer distributions, all efforts pooled (earth mover’s distance scaled to 0–1, so picking 6 instead of 7 still counts as close).')
+    + (darkMQ.matches ? ' Brighter' : ' Darker') + ' cells are more alike.';
+  const tiles = $('tiles'); tiles.textContent = '';
+  if (test) {
+    const dp = metric === 'jsd' ? 2 : 3;
+    const closer = test.within < test.between;
+    tiles.append(
+      tile('Same family', test.within.toFixed(dp), 'average distance'),
+      tile('Different families', test.between.toFixed(dp), 'average distance'),
+      tile('So far', test.p < 0.05 && closer ? 'Families cluster' : 'No clear family effect',
+           'p = ' + test.p.toFixed(3) + ', exact permutation test, ' + test.splits + ' label splits', true));
+  } else {
+    tiles.append(tile('So far', 'Not enough answers yet', 'needs at least two models per family', true));
+  }
+  if (m.noise && m.noise[metric] != null)
+    tiles.append(tile('Random vs random', m.noise[metric].toFixed(metric === 'jsd' ? 2 : 3), 'noise floor: two real random generators'));
+  let max = 0; D.forEach(r => r.forEach(v => { if (v != null && v > max) max = v; }));
+  const tbl = el('table', 'mx'), thead = el('thead'), tb = el('tbody');
+  const fr = el('tr'), lr = el('tr'); fr.append(el('th')); lr.append(el('th'));
+  let i = 0;
+  while (i < n) { let j = i; while (j < n && m.families[j] === m.families[i]) j++;
+    const th = el('th', 'famh' + (i ? ' gl' : ''), m.families[i]); th.colSpan = j - i; fr.append(th); i = j; }
+  m.labels.forEach((l, c) => lr.append(el('th', c && m.families[c] !== m.families[c - 1] ? 'gl' : '', l)));
+  thead.append(fr, lr);
+  for (let a = 0; a < n; a++) {
+    const tr = el('tr', a && m.families[a] !== m.families[a - 1] ? 'gt' : '');
+    tr.append(el('th', null, m.labels[a]));
+    for (let b = 0; b < n; b++) {
+      const v = D[a][b], gl = b && m.families[b] !== m.families[b - 1] ? ' gl' : '';
+      let td;
+      if (a === b) td = el('td', 'diag' + gl, '·');
+      else if (v == null) td = el('td', 'none' + gl, '');
+      else {
+        td = el('td', gl.trim(), v.toFixed(metric === 'jsd' ? 2 : 3));
+        const c = rampRGB(max ? 1 - v / max : 1);
+        td.style.background = rgb(c); td.style.color = inkOn(c);
+        td.title = m.labels[a] + ' vs ' + m.labels[b] + ': distance ' + v.toFixed(3);
+      }
+      tr.append(td);
+    }
+    tb.append(tr);
+  }
+  tbl.append(thead, tb);
+  const box = $('matrix'); box.textContent = ''; box.append(tbl);
+}
+
+/* ---------- top panel ---------- */
+function eta(s) {
+  if (s == null) return '';
+  if (s < 90) return 'about a minute left';
+  if (s < 5400) return 'about ' + Math.round(s / 60) + ' min left';
+  return 'about ' + (s / 3600).toFixed(1) + ' h left';
+}
+const tname = k => '1–' + k;
+function renderTop() {
+  $('demo').hidden = !S.demo;
+  const T = S.tests.find(t => t.k === range), busy = S.active != null && S.active !== range;
+  const b = $('run'), st = T.status, name = tname(range);
+  b.textContent = busy ? 'Run ' + name + ' test'
+    : { idle: 'Run ' + name + ' test', running: 'Pause', pausing: 'Pausing…', paused: 'Resume ' + name + ' test', done: name + ' test complete' }[st];
+  b.disabled = busy || st === 'pausing' || st === 'done';
+  $('pbar').style.width = (T.target ? T.done / T.target * 100 : 0) + '%';
+  const parts = [fmt(T.done) + ' of ' + fmt(T.target) + ' API calls'];
+  if (st === 'running') { parts.push(fmt(T.per_min) + ' per min'); const e = eta(T.eta_s); if (e) parts.push(e); }
+  else parts.push({ idle: 'not started', pausing: 'finishing calls in flight', paused: 'paused, progress saved', done: 'finished' }[st]);
+  if (busy) parts.push('the ' + tname(S.active) + ' test is running: pause it or wait before starting this one');
+  $('ptext').textContent = parts.join(' · ');
+  let msg = T.message || '';
+  if (!msg && st === 'done') {
+    const next = S.tests.find(t => t.status !== 'done');
+    msg = next ? name + ' test complete. Select the ' + tname(next.k) + ' test and press Run.' : 'All tests are complete.';
+  }
+  $('message').textContent = msg;
+  [...$('ranges').children].forEach((btn, i) => {
+    const t = S.tests[i];
+    btn.textContent = tname(t.k) + (t.status === 'done' ? ' ✓' : t.done ? ' · ' + Math.floor(t.done / t.target * 100) + '%' : '');
+  });
+  const box = $('providers'); box.textContent = '';
+  for (const p of S.providers) {
+    const bt = p.by_test[String(range)];
+    const d = el('div', 'prov'), head = el('div', 'pname');
+    head.append(el('span', null, p.name), el('span', null, S.active === range ? p.state : ''));
+    const val = el('div', 'pval', money(p.spent) + ' '); val.append(el('small', null, 'of ' + money(p.cap) + ' budget, all tests'));
+    const meter = el('div', 'meter'), fill = el('i'); fill.style.width = Math.min(100, p.cap ? p.spent / p.cap * 100 : 0) + '%'; meter.append(fill);
+    const sub = ['this test: ' + fmt(bt.done) + ' / ' + fmt(bt.target) + ' calls',
+                 money(bt.spent) + ' spent' + (bt.projected != null ? ', ' + money(bt.projected) + ' projected' : '')];
+    sub.push(S.demo ? 'simulated' : p.key ? '✓ API key found' : '○ no API key in .env yet');
+    d.append(head, val, meter, el('div', 'psub', sub.join(' · ')));
+    box.append(d);
+  }
+  const feed = $('feed'); feed.textContent = '';
+  if (!S.recent.length) feed.append(el('li', null, 'Nothing yet. Press Run.'));
+  for (const r of S.recent) {
+    const li = el('li');
+    li.append(el('span', 'ft', new Date(r.t * 1000).toLocaleTimeString('en-GB')),
+              el('span', 'fl', r.label + ' · ' + r.effort + ' · 1–' + r.k),
+              el('span', 'fv', r.valid ? r.text : '“' + r.text + '” (not valid)'));
+    feed.append(li);
+  }
+  const iss = $('issues'); iss.textContent = ''; S.issues.forEach(t => iss.append(el('li', null, t)));
+  const pr = $('prompts'); pr.textContent = '';
+  const line = (lead, id) => { const d = el('div', null, lead + ' '); d.append(el('q', null, S.prompts[id].replace('{max}', range))); return d; };
+  pr.append(line('Prompt sent to every model, ' + S.samples.main + ' times per effort level:', 'main'));
+  Object.keys(S.prompts).filter(id => id !== 'main').forEach(id => pr.append(line('Rewording check, ' + S.samples.para + ' times at ' + S.samples.para_effort + ' effort:', id)));
+  pr.append(el('div', null, 'Nothing else is sent: no system prompt and no earlier messages. Replies are free text, and each one is checked to be a number and nothing else.'));
+  $('datafile').textContent = T.file; $('allfile').textContent = S.data_file;
+}
+
+function renderCharts(force) {
+  const key = range + metric + darkMQ.matches;
+  if (!force && S.version === lastVersion && key === lastKey) return;
+  lastVersion = S.version; lastKey = key;
+  emptyColor = getComputedStyle(document.documentElement).getPropertyValue('--empty').trim() || emptyColor;
+  const hex = emptyColor.replace('#', '');
+  if (hex.length === 6) emptyRGB = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
+  $('lgramp').style.background = 'linear-gradient(90deg,' + Array.from({ length: 21 }, (_, i) => heat(Math.pow(Math.max(i, 0.4) / 20, 2))).join(',') + ')';
+  const view = S.views[String(range)];
+  renderRun(view); renderTable(view); renderFamLines(view); renderEffort(view); renderTiming(view); renderMatrix(view); renderShare(view);
+}
+
+function renderRanges() {
+  const box = $('ranges'); if (box.childElementCount === S.ranges.length) return;
+  box.textContent = '';
+  if (range == null) {   // ?test=10 opens that test; otherwise the first test still to run
+    const want = +URLQ.get('test');
+    range = S.ranges.includes(want) ? want : (S.tests.find(t => t.status !== 'done') || S.tests[0]).k;
+  }
+  for (const k of S.ranges) {
+    const b = el('button', null, '1–' + k); b.setAttribute('aria-pressed', k === range);
+    b.onclick = () => { range = k; [...box.children].forEach(c => c.setAttribute('aria-pressed', c === b)); renderTop(); renderCharts(); };
+    box.append(b);
+  }
+}
+
+async function poll() {
+  try {
+    const next = await (await fetch('/api/state', { cache: 'no-store' })).json();
+    if (S && S.active != null && next.active == null) lastVersion = -1;   // a test just ended: redraw
+    S = next;
+    renderRanges(); renderTop(); renderCharts();
+    if (document.body.classList.contains('only')) document.documentElement.dataset.h = document.querySelector('section.onlyshow').offsetHeight;
+  } catch (e) {
+    $('ptext').textContent = 'Lost contact with the benchmark. Reopen the .command file; progress is saved.';
+    $('run').disabled = true;
+  }
+}
+$('run').onclick = async () => {
+  const live = S && S.active === range && S.tests.find(t => t.k === range).status === 'running';
+  $('run').disabled = true;
+  await fetch(live ? '/api/pause' : '/api/run?range=' + range, { method: 'POST', headers: { 'X-Bench': '1' } });
+  poll();
+};
+[...$('metrics').children].forEach(b => b.onclick = () => {
+  metric = b.dataset.m; [...$('metrics').children].forEach(c => c.setAttribute('aria-pressed', c === b)); if (S) renderCharts();
+});
+window.addEventListener('resize', () => S && renderCharts(true));
+darkMQ.addEventListener('change', () => S && renderCharts(true));
+poll(); setInterval(poll, 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "samples_per_cell": 200,
+  "paraphrase_samples": 50,
+  "paraphrase_effort": "low",
+  "ranges": [10, 100, 1000],
+  "efforts": ["low", "medium", "high"],
+  "budget_usd": { "openai": 50, "anthropic": 50 },
+  "concurrency": { "openai": 8, "anthropic": 4 },
+  "max_output_tokens": 8000,
+  "prompts": {
+    "main": "Pick a random number between 1 and {max}. Reply with only the number.",
+    "para1": "Give me a random integer from 1 to {max}, inclusive. Output just the number, nothing else.",
+    "para2": "I need one random whole number in the range 1-{max}. Answer with the number only."
+  },
+  "baseline_seed": 20261114,
+  "models": [
+    { "provider": "local", "family": "Python random (control)", "control": true, "generator": "mt19937", "id": "python-random", "label": "random module", "efforts": ["run 1", "run 2", "run 3"] },
+    { "provider": "local", "family": "Python random (control)", "control": true, "generator": "os", "id": "python-secrets", "label": "secrets module", "efforts": ["run 1", "run 2", "run 3"] },
+    { "provider": "openai", "family": "GPT", "id": "gpt-6-luna", "label": "GPT-6 Luna", "price_in": 0.10, "price_out": 0.50 },
+    { "provider": "openai", "family": "GPT", "id": "gpt-6.1-terra", "label": "GPT-6.1 Terra", "price_in": 1.00, "price_out": 5.00 },
+    { "provider": "openai", "family": "GPT", "id": "gpt-6.2-sol", "label": "GPT-6.2 Sol", "price_in": 2.00, "price_out": 10.00 },
+    { "provider": "openai", "family": "GPT", "id": "gpt-6.2-astra", "label": "GPT-6.2 Astra", "price_in": 8.00, "price_out": 40.00 },
+    { "provider": "anthropic", "family": "Claude", "id": "claude-haiku-5-5", "label": "Claude Haiku 5.5", "price_in": 0.10, "price_out": 0.50 },
+    { "provider": "anthropic", "family": "Claude", "id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "price_in": 2.00, "price_out": 10.00 },
+    { "provider": "anthropic", "family": "Claude", "id": "claude-opus-5-5", "label": "Claude Opus 5.5", "price_in": 4.00, "price_out": 20.00 },
+    { "provider": "anthropic", "family": "Claude", "id": "claude-fable-5-2", "label": "Claude Fable 5.2", "price_in": 8.00, "price_out": 40.00 }
+  ]
+}
