@@ -15,6 +15,7 @@ import server
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO = "https://github.com/diegocp01/llm-random-number-benchmark"
+DATASET = "https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark"
 
 
 def main():
@@ -27,6 +28,8 @@ def main():
     for p in state["providers"]:
         p["key"] = False                      # the snapshot says nothing about local keys
     state["repo"] = REPO
+    state["links"] = [{"label": "GitHub", "icon": "github", "url": REPO},
+                      {"label": "Hugging Face", "icon": "hf", "url": DATASET}]
     state["snapshot_date"] = time.strftime("%d %b %Y", time.localtime(os.path.getmtime(bench.results_path))).lstrip("0")
 
     with open(os.path.join(ROOT, "ui", "index.html"), encoding="utf-8") as f:
