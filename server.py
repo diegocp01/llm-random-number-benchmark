@@ -647,7 +647,9 @@ class Bench:
                 return sum(vals) / len(vals) if vals else None
             views[str(k)] = {
                 "k": k, "bin_size": size, "uniform": {"mean": mean, "sd": sd},
-                "families": families, "llm": self._row(llm_counts, k),
+                "families": families,
+                "llm": dict(self._row(llm_counts, k),
+                            top=sorted(llm_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]),
                 "matrix": {
                     "labels": [l for l, _, _ in model_meta], "families": fams, "control": ctrl,
                     "jsd": jsd_m, "wass": was_m,

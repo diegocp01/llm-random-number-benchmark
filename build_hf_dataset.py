@@ -64,7 +64,7 @@ def main():
         w.writerows(kept)
 
     card = ["---", "license: cc-by-4.0", "language:", "- en", "pretty_name: LLM Random Number Benchmark",
-            "tags:", "- llm", "- benchmark", "- randomness", "- gpt", "- claude", "size_categories:", "- 1K<n<10K",
+            "tags:", "- llm", "- benchmark", "- randomness", "- gpt", "- claude", "size_categories:", "- 10K<n<100K",
             "configs:", "- config_name: calls", "  default: true", "  data_files:"]
     for split, rel, _ in splits:
         card += ["  - split: %s" % split, "    path: %s" % rel]
@@ -84,6 +84,8 @@ def main():
         "",
         "**1–10 test: 97.5% of 4,800 answers were 7.** Six of the ten numbers were never picked.",
         "",
+        "**1–100 test: 93% of 4,800 answers were one of five numbers (47, 73, 37, 67, 57).** 80 of the 100 numbers were never picked.",
+        "",
         "Code, method, figures and the full write-up: " + REPO,
         "",
         "## What is here",
@@ -96,7 +98,7 @@ def main():
     card += [
         "| `summary` | %d | one row per model × effort × range × prompt: counts, mean, SD, mode, spread, chi-square, cost |" % len(kept),
         "",
-        "Tests 1–100 and 1–1000 are added as splits when they are run.",
+        "Each test is one split. Tests not yet run are added when they finish.",
         "",
         "## Columns of `calls`",
         "",
