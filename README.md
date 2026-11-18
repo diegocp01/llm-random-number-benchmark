@@ -1,12 +1,18 @@
 # LLM Random Number Benchmark
 
+<p align="center">
+  <img src="docs/figures/summary-card-1-10.png" alt="97 percent of 4,800 answers to 'pick a random number between 1 and 10' were 7" width="620">
+</p>
+
+<p align="center">
+  <a href="https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark"><img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/dataset-on-hf-md.svg" alt="Dataset on Hugging Face"></a>
+</p>
+
 What happens when you ask a language model to pick a random number, thousands of times?
 
 This benchmark asks GPT and Claude models the same one-line question in a fresh
 conversation every time, at three reasoning efforts, and compares their answers
 with each other and with a real random number generator.
-
-![Summary of the 1–10 test](docs/figures/summary-card-1-10.png)
 
 ## Status
 

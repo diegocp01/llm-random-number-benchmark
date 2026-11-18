@@ -72,6 +72,10 @@ def main():
     card += [
         "# LLM Random Number Benchmark",
         "",
+        "[![Code and results on GitHub](https://img.shields.io/badge/GitHub-code%20and%20results-181717?logo=github)](" + REPO + ")",
+        "",
+        "<img src=\"https://raw.githubusercontent.com/diegocp01/llm-random-number-benchmark/main/docs/figures/summary-card-1-10.png\" alt=\"97 percent of 4,800 answers were 7\" width=\"620\">",
+        "",
         "What happens when you ask a language model to pick a random number, thousands of times?",
         "",
         "GPT and Claude models were asked the same one-line question in a fresh conversation every time,",
