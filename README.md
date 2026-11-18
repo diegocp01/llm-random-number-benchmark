@@ -6,6 +6,8 @@
 
 <p align="center">
   <a href="https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark"><img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/dataset-on-hf-md.svg" alt="Dataset on Hugging Face"></a>
+  &nbsp;
+  <a href="https://gptaiacademy.com/benchmarks/random-number"><img src="https://img.shields.io/badge/live%20results-gptaiacademy.com-2a78d6" alt="Live results on gptaiacademy.com" height="31"></a>
 </p>
 
 What happens when you ask a language model to pick a random number, thousands of times?
@@ -105,7 +107,7 @@ $0.88 at Anthropic.
 
 ## Data
 
-Everything the benchmark recorded is in this repository. The same data is on Hugging Face, where it can be browsed row by row: https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark
+Browse the results interactively at https://gptaiacademy.com/benchmarks/random-number. Everything the benchmark recorded is in this repository. The same data is on Hugging Face, where it can be browsed row by row: https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark
 
 | File | Contents |
 |---|---|

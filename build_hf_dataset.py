@@ -72,7 +72,8 @@ def main():
     card += [
         "# LLM Random Number Benchmark",
         "",
-        "[![Code and results on GitHub](https://img.shields.io/badge/GitHub-code%20and%20results-181717?logo=github)](" + REPO + ")",
+        "[![Code and results on GitHub](https://img.shields.io/badge/GitHub-code%20and%20results-181717?logo=github)](" + REPO + ")"
+        " [![Live results](https://img.shields.io/badge/live%20results-gptaiacademy.com-2a78d6)](https://gptaiacademy.com/benchmarks/random-number)",
         "",
         "<img src=\"https://raw.githubusercontent.com/diegocp01/llm-random-number-benchmark/main/docs/figures/summary-card-1-10.png\" alt=\"97 percent of 4,800 answers were 7\" width=\"620\">",
         "",
