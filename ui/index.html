@@ -137,7 +137,7 @@
 
   /* distribution table */
   .scroll { overflow-x: auto; }
-  #table { min-width: 940px; }
+  #table, #wtable { min-width: 940px; }
   .row { display: grid; grid-template-columns: 176px 70px minmax(320px, 1fr) 86px 100px 124px 230px;
          column-gap: 16px; align-items: center; min-height: 34px; }
   .row.head { color: var(--muted); font-size: 12px; align-items: end; padding-bottom: 6px;
@@ -244,6 +244,14 @@
       <div class="lg-key"><span class="lg-tick"></span>Spread a truly random picker would score with the same number of answers</div>
     </div>
     <div class="scroll"><div id="table"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Does the wording of the question matter?</h2>
+    <p class="sub" id="wsub"></p>
+    <div class="prompts" id="wprompts"></div>
+    <div class="qc" id="wsum" role="status"></div>
+    <div class="scroll"><div id="wtable"></div></div>
   </section>
 
   <section class="card">
@@ -376,8 +384,7 @@ function addRow(parent, key, cls, model, effort) {
   refs[key] = { cv, n, top, mean, fill, tick, val };
 }
 
-function buildTable(view) {
-  const t = $('table'); t.textContent = ''; refs = {};
+function headRow(view, col2) {
   const head = el('div', 'row head'), axis = el('div', 'axisl');
   const nb = Math.ceil(view.k / view.bin_size);
   const ticks = view.k <= 12 ? Array.from({ length: view.k }, (_, i) => i + 1)
@@ -387,9 +394,13 @@ function buildTable(view) {
     const pos = view.k > 12 && i === 0 ? 0 : view.k > 12 && i === ticks.length - 1 ? 100 : (Math.floor((v - 1) / view.bin_size) + .5) / nb * 100;
     s.style.left = pos + '%'; axis.append(s);
   });
-  head.append(el('div', null, 'Model'), el('div', null, 'Effort'), axis, el('div', null, 'Answers'),
+  head.append(el('div', null, 'Model'), el('div', null, col2), axis, el('div', null, 'Answers'),
               el('div', null, 'Top pick'), el('div', null, 'Mean ± SD'), el('div', null, 'Spread (1 = fully random)'));
-  t.append(head);
+  return head;
+}
+function buildTable(view) {
+  const t = $('table'); t.textContent = ''; refs = {}; wsig = '';
+  t.append(headRow(view, 'Effort'));
   addRow(t, 'ideal', 'ref', 'Perfectly random', '');
   for (const fam of view.families) {
     addRow(t, 'fam:' + fam.family, 'fam', fam.family + (fam.control ? ', pooled' : ' family, pooled'), '');
@@ -426,6 +437,35 @@ function renderTable(view) {
     fillRow('fam:' + fam.family, fam.pooled, view);
     for (const m of fam.models) for (const r of m.rows) fillRow(m.id + '|' + r.effort, r, view);
   }
+}
+
+/* ---------- rewording check ---------- */
+let wsig = '';
+function renderWording(view) {
+  const fams = view.families.filter(f => !f.control), ids = Object.keys(S.prompts), extra = ids.filter(x => x !== 'main');
+  const lab = id => id === 'main' ? 'main' : 'reword ' + (extra.indexOf(id) + 1);
+  const t = $('wtable');
+  const sigNow = view.k + '|' + fams.map(f => f.models.map(m => m.id + ':' + m.wording.map(w => w.prompt_id).join()).join()).join('|');
+  if (sigNow !== wsig) {
+    wsig = sigNow; t.textContent = '';
+    t.append(headRow(view, 'Prompt'));
+    fams.forEach(f => {
+      const g = el('div', 'row fam'); g.append(el('div', null, f.family + ' family')); t.append(g);
+      f.models.forEach(m => m.wording.forEach((w, i) => addRow(t, 'w:' + m.id + '|' + w.prompt_id, i === 0 ? 'first' : '', i === 0 ? m.label : '', lab(w.prompt_id))));
+    });
+  }
+  let same = 0, total = 0;
+  fams.forEach(f => f.models.forEach(m => {
+    m.wording.forEach(w => fillRow('w:' + m.id + '|' + w.prompt_id, w, view));
+    const main = m.wording.find(w => w.prompt_id === 'main'), others = m.wording.filter(w => w.prompt_id !== 'main' && w.stats.n);
+    if (main && main.stats.n && others.length) { total++; if (others.every(w => w.stats.mode === main.stats.mode)) same++; }
+  }));
+  $('wsub').textContent = 'The same question asked ' + ids.length + ' ways, all at ' + S.samples.para_effort + ' reasoning effort: ' + S.samples.main
+    + ' answers per model for the main prompt and ' + S.samples.para + ' for each rewording. If the wording mattered, the strips of one model would differ.';
+  const pr = $('wprompts'); pr.textContent = '';
+  ids.forEach(id => { const d = el('div', null, lab(id) + ': '); d.append(el('q', null, S.prompts[id].replace('{max}', view.k))); pr.append(d); });
+  $('wsum').textContent = !total ? 'No rewording answers yet.'
+    : (same === total ? '\u2713 ' : '') + 'In ' + same + ' of ' + total + ' models the most picked number is the same for every wording.';
 }
 
 /* ---------- line charts ---------- */
@@ -721,7 +761,9 @@ function renderShare(view) {
   }
   const L = view.llm.stats, models = view.families.filter(f => !f.control).reduce((a, f) => a + f.models.length, 0);
   sh.title.textContent = '\u201c' + S.prompts.main.replace('{max}', view.k) + '\u201d';
-  sh.sub.textContent = L.n ? fmt(L.n) + ' answers from ' + models + ' AI models' + (T.status === 'done' ? '' : ' so far') : 'No answers yet';
+  const effs = []; view.families.forEach(f => { if (!f.control) f.models.forEach(m => m.rows.forEach(r => { if (!effs.includes(r.effort)) effs.push(r.effort); })); });
+  sh.sub.textContent = !L.n ? 'No answers yet' : fmt(L.n) + ' answers from ' + models + ' AI models'
+    + (T.status === 'done' ? ': ' + S.samples.main + ' per model at each reasoning effort (' + effs.join(', ') + ')' : ' so far');
   sh.num.textContent = L.n ? L.mode : '?';
   sh.ht.textContent = '';
   if (L.n) sh.ht.append(el('b', null, pct(L.mode_share) + ' of all answers were ' + L.mode + '.'), el('br'),
@@ -732,7 +774,7 @@ function renderShare(view) {
     drawStrip(r.cv);
     r.top.textContent = s.n ? s.mode + ' \u00b7 ' + pct(s.mode_share) : '';
   });
-  sh.foot.textContent = 'Same question, a fresh conversation every time, at low, medium and high reasoning effort. Stronger colour = picked more often.';
+  sh.foot.textContent = 'Each strip is all of a model\u2019s answers, every effort together. A fresh conversation every time. Stronger colour = picked more often.';
 }
 
 /* ---------- family comparison ---------- */
@@ -862,7 +904,7 @@ function renderCharts(force) {
   if (hex.length === 6) emptyRGB = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
   $('lgramp').style.background = 'linear-gradient(90deg,' + Array.from({ length: 21 }, (_, i) => heat(Math.pow(Math.max(i, 0.4) / 20, 2))).join(',') + ')';
   const view = S.views[String(range)];
-  renderRun(view); renderTable(view); renderFamLines(view); renderEffort(view); renderTiming(view); renderMatrix(view); renderShare(view);
+  renderRun(view); renderTable(view); renderWording(view); renderFamLines(view); renderEffort(view); renderTiming(view); renderMatrix(view); renderShare(view);
 }
 
 function renderRanges() {

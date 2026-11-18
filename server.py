@@ -597,8 +597,15 @@ class Bench:
                         for v, n in c.counts.items():
                             m_counts[v] = m_counts.get(v, 0) + n
                             fam_counts[v] = fam_counts.get(v, 0) + n
+                    # the same question in each wording, all at the rewording-check effort
+                    wording = []
+                    for c in self.cells:
+                        if c.model == m["id"] and c.k == k and not c.control and c.effort == self.cfg.get("paraphrase_effort"):
+                            w = self._row(c.counts, k, c.done, c.target, c.invalid, c.disabled)
+                            w["prompt_id"] = c.prompt_id
+                            wording.append(w)
                     models.append({"id": m["id"], "label": m.get("label", m["id"]), "rows": rows,
-                                   "pooled": self._row(m_counts, k)})
+                                   "pooled": self._row(m_counts, k), "wording": wording})
                     pooled_by_model.append(m_counts)
                     model_meta.append((m.get("label", m["id"]), fam, bool(m.get("control"))))
                 families.append({"family": fam, "control": all(c for _, f, c in model_meta if f == fam),

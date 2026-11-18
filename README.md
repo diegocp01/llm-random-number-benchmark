@@ -25,7 +25,7 @@ Results below are for the 1–10 test only. This README is updated as each test 
 - **Six of the ten numbers were never picked.** Not once in 4,800 answers did a model say 1, 2, 3, 5, 9 or 10. Everything that was not a 7 was a 4 (74 times), an 8 (34) or a 6 (14).
 - **Both families converge on the same number.** GPT models answered 7 in 95.8% of calls, Claude models in 99.1%. Models from the same family are no closer to each other than models from different families (exact permutation test, p = 0.26), so there is no family signature here: there is one shared favourite.
 - **17 of the 24 model × effort combinations answered 7 all 200 times.**
-- **Rewording the question changed nothing.** Two paraphrased prompts, 1,600 calls: 1,600 sevens.
+- **Rewording the question changed nothing.** Two paraphrased prompts, 800 calls at low effort: 800 sevens.
 - **Departures from 7 come almost entirely from reasoning.** When a model produced reasoning tokens, 8.2% of answers were not 7; when it did not, 0.3%. The saved reasoning shows why: *"I'll just go with 4 and avoid the obvious 7."* The models know 7 is the cliché, and avoiding it sends them to the same few neighbours.
 - **More reasoning effort helps a little, in some models.** GPT-6.1 Terra went from 100% sevens at low effort to 78% at high. Claude Opus 5.5 and GPT-6.2 Astra only moved at high effort (90% and 87%). The other five stayed at 99–100% sevens at every effort.
 - **The control behaves.** Python's `random` and `secrets` modules, run through the same pipeline, spread evenly over all ten numbers (each between 8.8% and 11.6% of 1,200 draws).
@@ -46,6 +46,10 @@ Shares are over the 600 main-prompt answers per model; costs include the 100 rew
 ### Every model at every effort
 
 ![Answer distribution per model and effort](docs/figures/distributions-1-10.png)
+
+### Does the wording matter?
+
+![Rewording check](docs/figures/wording-1-10.png)
 
 ### Does more reasoning effort make the picks more random?
 
