@@ -99,7 +99,7 @@ $0.88 at Anthropic.
 
 ## Data
 
-Everything the benchmark recorded is in this repository.
+Everything the benchmark recorded is in this repository. The same data is on Hugging Face, where it can be browsed row by row: https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark
 
 | File | Contents |
 |---|---|
