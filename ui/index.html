@@ -66,6 +66,8 @@
   section.solo { padding: 0; } section.solo > h2, section.solo > .sub { display: none; }
   section.solo #share { margin: 0; border: 0; border-radius: 0; width: 100%; }
 
+  body.static #run, body.static .testrow .hint, body.static #feed, body.static #issues, body.static #livesub { display: none; }
+
   /* controls */
   .testrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
   .testrow label { color: var(--ink2); font-size: 13px; }
@@ -282,8 +284,8 @@
   </section>
 
   <section class="card">
-    <h2>Live answers</h2>
-    <p class="sub">The prompts every model receives, and the latest replies as they arrive from the APIs.</p>
+    <h2 id="liveh">Live answers</h2>
+    <p class="sub" id="livesub">The prompts every model receives, and the latest replies as they arrive from the APIs.</p>
     <div class="prompts" id="prompts"></div>
     <ul id="feed"></ul>
     <ul id="issues"></ul>
@@ -328,6 +330,9 @@ const inkOn = c => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 > 0.55 
 
 // ?only=<element id> shows just that card, for clean figure exports
 const URLQ = new URLSearchParams(location.search);
+// A page built by build_site.py carries its data inline and is read-only: no server, no Run button.
+const STATIC = !!window.SNAPSHOT;
+if (STATIC) document.body.classList.add('static');
 if (URLQ.get('only')) {
   const sec = (document.getElementById(URLQ.get('only')) || document.body).closest('section');
   if (sec) { document.body.classList.add('only'); sec.classList.add('onlyshow'); if (URLQ.get('only') === 'share') sec.classList.add('solo'); }
@@ -842,7 +847,8 @@ function eta(s) {
 }
 const tname = k => '1–' + k;
 function renderTop() {
-  $('demo').hidden = !S.demo;
+  $('demo').hidden = !S.demo && !STATIC;
+  if (STATIC) $('demo').textContent = 'Results snapshot, ' + S.snapshot_date;
   const T = S.tests.find(t => t.k === range), busy = S.active != null && S.active !== range;
   const b = $('run'), st = T.status, name = tname(range);
   b.textContent = busy ? 'Run ' + name + ' test'
@@ -859,7 +865,7 @@ function renderTop() {
     const next = S.tests.find(t => t.status !== 'done');
     msg = next ? name + ' test complete. Select the ' + tname(next.k) + ' test and press Run.' : 'All tests are complete.';
   }
-  $('message').textContent = msg;
+  $('message').textContent = STATIC ? '' : msg;
   [...$('ranges').children].forEach((btn, i) => {
     const t = S.tests[i];
     btn.textContent = tname(t.k) + (t.status === 'done' ? ' ✓' : t.done ? ' · ' + Math.floor(t.done / t.target * 100) + '%' : '');
@@ -873,7 +879,7 @@ function renderTop() {
     const meter = el('div', 'meter'), fill = el('i'); fill.style.width = Math.min(100, p.cap ? p.spent / p.cap * 100 : 0) + '%'; meter.append(fill);
     const sub = ['this test: ' + fmt(bt.done) + ' / ' + fmt(bt.target) + ' calls',
                  money(bt.spent) + ' spent' + (bt.projected != null ? ', ' + money(bt.projected) + ' projected' : '')];
-    sub.push(S.demo ? 'simulated' : p.key ? '✓ API key found' : '○ no API key in .env yet');
+    if (!STATIC) sub.push(S.demo ? 'simulated' : p.key ? '✓ API key found' : '○ no API key in .env yet');
     d.append(head, val, meter, el('div', 'psub', sub.join(' · ')));
     box.append(d);
   }
@@ -892,7 +898,7 @@ function renderTop() {
   pr.append(line('Prompt sent to every model, ' + S.samples.main + ' times per effort level:', 'main'));
   Object.keys(S.prompts).filter(id => id !== 'main').forEach(id => pr.append(line('Rewording check, ' + S.samples.para + ' times at ' + S.samples.para_effort + ' effort:', id)));
   pr.append(el('div', null, 'Nothing else is sent: no system prompt and no earlier messages. Replies are free text, and each one is checked to be a number and nothing else.'));
-  $('datafile').textContent = T.file; $('allfile').textContent = S.data_file;
+  if (!STATIC) { $('datafile').textContent = T.file; $('allfile').textContent = S.data_file; }
 }
 
 function renderCharts(force) {
@@ -912,7 +918,8 @@ function renderRanges() {
   box.textContent = '';
   if (range == null) {   // ?test=10 opens that test; otherwise the first test still to run
     const want = +URLQ.get('test');
-    range = S.ranges.includes(want) ? want : (S.tests.find(t => t.status !== 'done') || S.tests[0]).k;
+    const first = STATIC ? [...S.tests].reverse().find(t => t.done) : S.tests.find(t => t.status !== 'done');   // snapshot: newest test with data
+    range = S.ranges.includes(want) ? want : (first || S.tests[0]).k;
   }
   for (const k of S.ranges) {
     const b = el('button', null, '1–' + k); b.setAttribute('aria-pressed', k === range);
@@ -922,6 +929,13 @@ function renderRanges() {
 }
 
 async function poll() {
+  if (STATIC) {
+    S = window.SNAPSHOT; renderRanges(); renderTop(); renderCharts();
+    $('liveh').textContent = 'The prompts';
+    const f = document.querySelector('footer'), a = el('a', null, S.repo.replace('https://', '')); a.href = S.repo;
+    f.textContent = 'Snapshot of the LLM Random Number Benchmark. Code and every recorded answer: '; f.append(a);
+    return;
+  }
   try {
     const next = await (await fetch('/api/state', { cache: 'no-store' })).json();
     if (S && S.active != null && next.active == null) lastVersion = -1;   // a test just ended: redraw
@@ -944,7 +958,7 @@ $('run').onclick = async () => {
 });
 window.addEventListener('resize', () => S && renderCharts(true));
 darkMQ.addEventListener('change', () => S && renderCharts(true));
-poll(); setInterval(poll, 1000);
+poll(); if (!STATIC) setInterval(poll, 1000);
 </script>
 </body>
 </html>

@@ -107,6 +107,8 @@ Everything the benchmark recorded is in this repository.
 | `data/results.jsonl` | Results only, all tests, one line per call |
 | `results/summary.csv` | One row per model × effort × range × prompt: counts, mean, SD, mode, spread, chi-square test, cost |
 
+`site/index.html` is the full results interface as one self-contained, read-only page: it carries a snapshot of the results inline, needs no server, and can be opened from disk or hosted anywhere. `python3 build_site.py` rebuilds it after a test; `python3 build_hf_dataset.py` writes the same results in the layout the Hugging Face dataset viewer reads.
+
 Fields of a record in `data/test_1-*.json`:
 
 | Field | Meaning |

@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Random Number Benchmark</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+    --accent: #2a78d6; --track: #cde2fb; --empty: #efeeea; --on-accent: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+      --accent: #3987e5; --track: #184f95; --empty: #262624; --on-accent: #ffffff;
+    }
+  }
+  :root { --track: color-mix(in srgb, var(--accent) 22%, var(--surface)); --s1: #2a78d6; --s2: #eb6834; }
+  @media (prefers-color-scheme: dark) { :root { --s1: #3987e5; --s2: #d95926; } }
+
+  /* line charts */
+  .plot { position: relative; }
+  .plot svg { display: block; overflow: visible; }
+  .plot .g { stroke: var(--grid); stroke-width: 1; }
+  .plot .ax { stroke: var(--axis); stroke-width: 1; }
+  .plot .ref { stroke: var(--muted); stroke-width: 1; }
+  .plot .cross { stroke: var(--ink2); stroke-width: 1; }
+  .plot .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .plot .dot { stroke: var(--surface); stroke-width: 2; }
+  .plot .lead { stroke: var(--axis); stroke-width: 1; }
+  .plot text { font-size: 12.5px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .plot text.lb { font-size: 13.5px; fill: var(--ink2); }
+  .plot text.fh { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .keys i.sq { width: 13px; height: 11px; border-radius: 2px; }
+  :root { --e1: #86b6ef; --e2: #2a78d6; --e3: #104281; }
+  @media (prefers-color-scheme: dark) { :root { --e1: #184f95; --e2: #3987e5; --e3: #9ec5f4; } }
+  .keys { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink2); font-size: 12.5px; margin: 0 0 8px; }
+  .keys span { display: inline-flex; align-items: center; gap: 6px; }
+  .keys i, #tip .tr i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+  .panels { display: flex; gap: 24px; flex-wrap: wrap; }
+  .panel { flex: 1 1 380px; min-width: 0; }
+  .panel .pt { font-weight: 650; font-size: 13px; margin-bottom: 4px; }
+  #tip .tr { display: flex; align-items: center; gap: 7px; }
+  #tip .tr strong, #tip .tr span { display: inline; font-size: 12px; }
+  #tip .tr strong { min-width: 40px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1900px; margin: 0 auto; padding: 24px clamp(16px, 2.2vw, 44px) 48px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  h2 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
+  .sub { color: var(--ink2); margin: 0 0 14px; font-size: 13px; max-width: 78ch; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px;
+           border: 1px solid var(--axis); color: var(--ink2); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 16px; margin-bottom: 16px; }
+
+  body.only main { padding: 0; max-width: none; }
+  body.only main > * { display: none; }
+  body.only main > section.onlyshow { display: block; margin: 0; border: 0; border-radius: 0; }
+  section.solo { padding: 0; } section.solo > h2, section.solo > .sub { display: none; }
+  section.solo #share { margin: 0; border: 0; border-radius: 0; width: 100%; }
+
+  body.static #run, body.static .testrow .hint, body.static #feed, body.static #issues, body.static #livesub { display: none; }
+
+  /* controls */
+  .testrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .testrow label { color: var(--ink2); font-size: 13px; }
+  .testrow .hint { color: var(--muted); font-size: 12.5px; }
+  .runrow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  button.primary { font: inherit; font-weight: 650; font-size: 15px; min-width: 170px; padding: 9px 18px;
+                   border-radius: 8px; border: 0; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+  button.primary:disabled { background: var(--grid); color: var(--muted); cursor: default; }
+  .progress { flex: 1; min-width: 240px; }
+  .meter { height: 8px; border-radius: 99px; background: var(--track); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s; }
+  .ptext { color: var(--ink2); font-size: 13px; margin-top: 6px; }
+  #message { margin-top: 12px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--axis); font-size: 13px; }
+  #message:empty { display: none; }
+  .providers { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
+  .prov { border: 1px solid var(--grid); border-radius: 8px; padding: 12px; }
+  .pname { display: flex; justify-content: space-between; gap: 8px; color: var(--ink2); font-size: 13px; }
+  .pval { font-size: 22px; font-weight: 650; margin: 2px 0 8px; }
+  .pval small { font-size: 13px; font-weight: 400; color: var(--ink2); }
+  .psub { color: var(--ink2); font-size: 12.5px; margin-top: 6px; }
+
+  /* run status */
+  .epoch { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .ebig { font-size: 30px; font-weight: 650; }
+  .esub { color: var(--ink2); font-size: 13px; }
+  .mbars { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 7px 32px; margin-bottom: 18px; }
+  .mbar { display: grid; grid-template-columns: 132px 1fr 92px; align-items: center; gap: 10px; font-size: 13px; }
+  .mbar span:last-child { color: var(--ink2); font-variant-numeric: tabular-nums; text-align: right; }
+  .qc { border: 1px solid var(--grid); border-radius: 6px; padding: 8px 10px; font-size: 13px; margin: -4px 0 16px; }
+  .qcx { margin: -10px 0 16px; padding-left: 22px; font-size: 12.5px; color: var(--ink2); } .qcx:empty { display: none; }
+  .two { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .two > div { flex: 1 1 400px; min-width: 0; }
+  .ct { font-weight: 650; font-size: 13px; margin-bottom: 4px; }
+  .cap { color: var(--ink2); font-size: 12.5px; margin: 0 0 8px; max-width: 62ch; }
+  .prompts { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 13px; }
+  .prompts div { color: var(--ink2); margin-top: 6px; } .prompts div:first-child { margin-top: 0; }
+  .prompts q { color: var(--ink); font-weight: 600; quotes: "\201c" "\201d"; }
+
+  /* summary card: a square made for screenshots */
+  #share { width: min(100%, 720px); aspect-ratio: 1 / 1; margin: 0 auto; background: var(--page); border: 1px solid var(--border);
+           border-radius: 14px; padding: 32px 36px; display: flex; flex-direction: column; }
+  .sh-k { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .sh-t { font-size: 25px; font-weight: 650; line-height: 1.2; margin: 6px 0 4px; }
+  .sh-s { color: var(--ink2); font-size: 14px; }
+  .sh-hero { display: flex; align-items: center; gap: 20px; margin: 16px 0 12px; }
+  .sh-num { font-size: 76px; font-weight: 700; line-height: 1; }
+  .sh-ht { font-size: 16.5px; line-height: 1.35; color: var(--ink2); } .sh-ht b { color: var(--ink); font-weight: 650; }
+  .sh-rows { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+  .sh-row { display: grid; grid-template-columns: 136px 1fr 84px; gap: 12px; align-items: center; font-size: 13.5px; }
+  .sh-row canvas { width: 100%; height: 22px; display: block; border-radius: 3px; }
+  .sh-row .num { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .sh-row.g { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .sh-f { color: var(--muted); font-size: 12px; margin-top: 12px; display: flex; justify-content: space-between; gap: 16px; }
+  .sh-f span:last-child { white-space: nowrap; }
+  @media (max-width: 700px) { #share { aspect-ratio: auto; padding: 20px 16px; } .sh-row { grid-template-columns: 104px 1fr 70px; } .sh-num { font-size: 56px; } }
+  table.log { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; width: 100%; }
+  table.log th { font-weight: 500; color: var(--muted); text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  table.log td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  table.log tr:last-child td { font-weight: 650; border-bottom: 0; }
+  table.log th:first-child, table.log td:first-child { text-align: left; }
+
+  /* filter row */
+  .filters { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin: 0 0 12px 2px; }
+  .filters label { color: var(--ink2); font-size: 13px; margin-right: 6px; }
+  .seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 8px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 13px; padding: 5px 12px; border: 0; background: transparent; color: var(--ink2); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--axis); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); font-weight: 600; }
+
+  /* distribution table */
+  .scroll { overflow-x: auto; }
+  #table, #wtable { min-width: 940px; }
+  .row { display: grid; grid-template-columns: 176px 70px minmax(320px, 1fr) 86px 100px 124px 230px;
+         column-gap: 16px; align-items: center; min-height: 34px; }
+  .row.head { color: var(--muted); font-size: 12px; align-items: end; padding-bottom: 6px;
+              border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
+  .row.fam { margin-top: 12px; font-weight: 650; }
+  .row.ref { color: var(--ink2); }
+  .row.first { margin-top: 5px; }
+  .row .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row .eff { color: var(--ink2); }
+  .row canvas { width: 100%; height: 26px; display: block; border-radius: 3px; }
+  .row.fam canvas { height: 32px; }
+  .axisl { position: relative; height: 15px; font-variant-numeric: tabular-nums; }
+  .axisl span { position: absolute; bottom: 0; transform: translateX(-50%); }
+  .axisl span.l { transform: none; } .axisl span.r { transform: translateX(-100%); }
+  .spread { display: flex; align-items: center; gap: 8px; }
+  .sbar { position: relative; flex: 1; height: 8px; border-radius: 99px; background: var(--track); }
+  .sbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: var(--accent); }
+  .sbar b { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+  .legend { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; color: var(--ink2); font-size: 12px; margin: 0 0 14px; }
+  .lg-ramp { position: relative; width: 200px; height: 30px; }
+  .lg-ramp i { display: block; height: 10px; border-radius: 3px; }
+  .lg-ramp span { position: absolute; top: 13px; transform: translateX(-50%); color: var(--muted); }
+  .lg-key { display: inline-flex; align-items: center; gap: 6px; }
+  .lg-tick { display: inline-block; width: 2px; height: 14px; background: var(--ink); border-radius: 1px; }
+
+  /* family comparison */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { border: 1px solid var(--grid); border-radius: 8px; padding: 12px; }
+  .tile .tl { color: var(--ink2); font-size: 13px; }
+  .tile .tv { font-size: 24px; font-weight: 650; margin-top: 2px; }
+  .tile .tv.words { font-size: 17px; line-height: 1.3; padding: 3px 0; }
+  .tile .ts { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  table.mx { border-collapse: separate; border-spacing: 2px; font-size: 14.5px; width: 100%; table-layout: fixed; min-width: 860px; }
+  table.mx th:first-child { width: 170px; }
+  table.mx th { font-weight: 500; color: var(--ink2); padding: 2px 6px; text-align: right; white-space: nowrap; }
+  table.mx thead th { text-align: center; white-space: normal; vertical-align: bottom; line-height: 1.2; }
+  table.mx thead th.famh { color: var(--ink); font-weight: 650; border-bottom: 1px solid var(--axis); }
+  table.mx td { height: 50px; text-align: center; border-radius: 4px; font-variant-numeric: tabular-nums; }
+  table.mx td.diag { color: var(--muted); }
+  table.mx td.none { background: var(--empty); }
+  table.mx .gl { border-left: 10px solid var(--surface); }
+  table.mx tr.gt > * { border-top: 10px solid var(--surface); }
+
+  /* feed */
+  #feed { list-style: none; margin: 0; padding: 0; font-size: 13px; columns: 2 320px; column-gap: 32px; }
+  #feed li { display: flex; gap: 10px; padding: 2px 0; break-inside: avoid; }
+  #feed .ft { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #feed .fl { color: var(--ink2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #feed .fv { font-weight: 650; font-variant-numeric: tabular-nums; }
+  #issues { margin: 12px 0 0; padding: 0 0 0 18px; color: var(--ink2); font-size: 13px; }
+  #issues:empty { display: none; }
+  footer { color: var(--muted); font-size: 12.5px; }
+  footer a { color: var(--ink2); }
+  #tip { position: fixed; z-index: 10; pointer-events: none; display: none; background: var(--surface);
+         border: 1px solid var(--axis); border-radius: 6px; padding: 6px 9px; font-size: 12px;
+         box-shadow: 0 4px 14px rgba(0,0,0,.14); }
+  #tip strong { display: block; font-size: 14px; }
+  #tip span { color: var(--ink2); display: block; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Random Number Benchmark</h1>
+    <span class="badge" id="demo" hidden>Demo: simulated answers, not model data</span>
+  </header>
+
+  <section class="card">
+    <div class="testrow"><label>Test</label><span class="seg" id="ranges"></span><span class="hint">Each test is started by hand: pick one, then press Run.</span></div>
+    <div class="runrow">
+      <button class="primary" id="run" disabled>Run</button>
+      <div class="progress">
+        <div class="meter"><i id="pbar"></i></div>
+        <div class="ptext" id="ptext">Connecting…</div>
+      </div>
+    </div>
+    <div id="message" role="status"></div>
+    <div class="providers" id="providers"></div>
+  </section>
+
+  <section class="card">
+    <h2>Run status</h2>
+    <p class="sub">Every model is asked the same question 200 times at each effort level. A round is finished when every model has answered one more time, so "round 11" means everyone has answered at least 11 times. Round 200 is the end of the test.</p>
+    <div class="epoch"><div class="ebig" id="eround"></div><div class="esub" id="esub"></div></div>
+    <div class="mbars" id="mbars"></div>
+    <div class="qc" id="qc" role="status"></div><ul class="qcx" id="qcx"></ul>
+    <div class="two">
+      <div><div class="ct">How varied are the answers so far?</div><p class="cap">Top of the chart = every number picked equally often (truly random). Bottom = the same number every time. One point per finished round; the lines stop moving once there is enough data.</p><div class="keys" id="convkeys"></div><div class="plot" id="conv"></div></div>
+      <div><div class="ct">Round log</div><p class="cap">The same numbers as text, one line per round. "Spread" is the chart value. "Same fam." and "Cross fam." say how differently two models answer when they are from the same family or from different ones (0 = identical).</p><div class="scroll"><table class="log" id="elog"></table></div></div>
+    </div>
+  </section>
+
+  <div class="filters">
+    <div><label>Compare models by</label><span class="seg" id="metrics">
+      <button data-m="jsd" aria-pressed="true">Same answers</button><button data-m="wass" aria-pressed="false">Nearby answers</button>
+    </span></div>
+  </div>
+
+  <section class="card">
+    <h2>What each model picks</h2>
+    <p class="sub">Each strip is one model at one reasoning effort. A stronger colour means that number was picked more often. A truly random picker looks like the flat top row.</p>
+    <div class="legend">
+      <div>Share of answers<div class="lg-ramp"><i id="lgramp"></i><span style="left:10%">1%</span><span style="left:22.4%">5%</span><span style="left:50%">25%</span><span style="left:94%">100%</span></div></div>
+      <div class="lg-key"><span class="lg-tick"></span>Spread a truly random picker would score with the same number of answers</div>
+    </div>
+    <div class="scroll"><div id="table"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Does the wording of the question matter?</h2>
+    <p class="sub" id="wsub"></p>
+    <div class="prompts" id="wprompts"></div>
+    <div class="qc" id="wsum" role="status"></div>
+    <div class="scroll"><div id="wtable"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Where each family's answers land</h2>
+    <p class="sub">All models and efforts of a family pooled into one curve. Peaks on the same numbers mean the two families share favourites; the flat line is what truly random picking gives.</p>
+    <div class="keys" id="famkeys"></div>
+    <div class="plot" id="famline"></div>
+  </section>
+
+  <section class="card">
+    <h2>Does more reasoning effort make the picks more random?</h2>
+    <p class="sub">Spread of each model's answers at low, medium and high effort (1 = every number equally likely). A line that climbs means thinking harder spreads the picks out.</p>
+    <div class="panels" id="effort"></div>
+  </section>
+
+  <section class="card">
+    <h2>How long does each answer take?</h2>
+    <p class="sub">Typical (median) time from sending the question to receiving the full reply, in seconds, at each reasoning effort. The thin line reaches the time 90% of calls finished within.</p>
+    <div class="keys" id="timekeys"></div>
+    <div class="plot" id="timing"></div>
+  </section>
+
+  <section class="card">
+    <h2>Do models from the same family pick alike?</h2>
+    <p class="sub" id="mxsub"></p>
+    <div class="tiles" id="tiles"></div>
+    <div class="scroll"><div id="matrix"></div></div>
+  </section>
+
+  <section class="card">
+    <h2 id="liveh">Live answers</h2>
+    <p class="sub" id="livesub">The prompts every model receives, and the latest replies as they arrive from the APIs.</p>
+    <div class="prompts" id="prompts"></div>
+    <ul id="feed"></ul>
+    <ul id="issues"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Summary card</h2>
+    <p class="sub">One square picture of the test selected at the top, made for a screenshot. Each strip pools a model's answers at all three efforts.</p>
+    <div id="share"></div>
+  </section>
+
+  <footer>Every call of this test (prompt, reasoning, answer) is saved to <code id="datafile"></code> as it arrives; the results of all tests go to <code id="allfile"></code>. <a href="/api/summary.csv">Download summary table (CSV)</a></footer>
+</main>
+<div id="tip"></div>
+
+<script>window.SNAPSHOT = {"demo":false,"version":0,"active":null,"tests":[{"k":10,"status":"done","message":"","done":5600,"target":5600,"per_min":0,"eta_s":null,"file":"data/test_1-10.json","quality":{"total":5600,"clean":5600,"extra":0,"unusable":0,"examples":[]},"round":200,"rounds":200,"history":[{"round":1,"calls":46,"spent":0.0080634,"spread":{"GPT":0.2327649264037233,"Claude":-0.0},"within":null,"between":null},{"round":2,"calls":91,"spent":0.017800899999999995,"spread":{"GPT":0.13697486724043395,"Claude":0.07080026270924333},"within":0.06992003602514153,"between":0.05806667004727281},{"round":3,"calls":143,"spent":0.0271682,"spread":{"GPT":0.15197913844938496,"Claude":0.05077199947712567},"within":0.06219719159590296,"between":0.05120590850528533},{"round":4,"calls":181,"spent":0.0351958,"spread":{"GPT":0.14627521676718433,"Claude":0.04191330910183951},"within":0.05846209307561958,"between":0.04910000722546133},{"round":5,"calls":223,"spent":0.0454056,"spread":{"GPT":0.12593243729548118,"Claude":0.03585749698766049},"within":0.047320385561696245,"between":0.03982687460245592},{"round":6,"calls":263,"spent":0.0554599,"spread":{"GPT":0.12800064463956742,"Claude":0.06209739887893117},"within":0.047398630701678324,"between":0.04518085071590706},{"round":7,"calls":306,"spent":0.0639255,"spread":{"GPT":0.11376419271436702,"Claude":0.0544547849667233},"within":0.03935615997283376,"between":0.037545828529048385},{"round":8,"calls":355,"spent":0.07291019999999998,"spread":{"GPT":0.10120666785102321,"Claude":0.04900026304375446},"within":0.03363008491742145,"between":0.03201054723320045},{"round":9,"calls":398,"spent":0.08303380000000002,"spread":{"GPT":0.10631981479397369,"Claude":0.06188246512508507},"within":0.03544547870338333,"between":0.033744278741397},{"round":10,"calls":439,"spent":0.0920481,"spread":{"GPT":0.11093200602799341,"Claude":0.056915991354755426},"within":0.030521103165151126,"between":0.03396745594640243},{"round":11,"calls":483,"spent":0.1022114,"spread":{"GPT":0.10258006204489253,"Claude":0.05306445456695993},"within":0.027722493487310835,"between":0.03067863605730389},{"round":12,"calls":524,"spent":0.11037119999999999,"spread":{"GPT":0.09637676480913575,"Claude":0.04945762365758191},"within":0.02552912476768548,"between":0.028329460832232957},{"round":13,"calls":574,"spent":0.11938789999999998,"spread":{"GPT":0.08977993417664161,"Claude":0.045865694542942224},"within":0.023140350036579393,"between":0.025702099378317383},{"round":14,"calls":616,"spent":0.1276723,"spread":{"GPT":0.08544341004696232,"Claude":0.043206523718043205},"within":0.02159061254601791,"between":0.024031973454436452},{"round":15,"calls":658,"spent":0.13629539999999998,"spread":{"GPT":0.08062469139704186,"Claude":0.04104527514590536},"within":0.020209517666170625,"between":0.02247767335068226},{"round":16,"calls":709,"spent":0.1473591,"spread":{"GPT":0.07556881813115437,"Claude":0.03877360673477702},"within":0.01878531927700133,"between":0.020815642246340933},{"round":17,"calls":757,"spent":0.155974,"spread":{"GPT":0.07208881614699077,"Claude":0.03675755848315771},"within":0.017599013167740235,"between":0.019515609791372353},{"round":18,"calls":793,"spent":0.16445980000000004,"spread":{"GPT":0.07583207968060626,"Claude":0.03535406758082911},"within":0.017438724970886475,"between":0.019876257721702824},{"round":19,"calls":838,"spent":0.17348290000000002,"spread":{"GPT":0.08505751189926125,"Claude":0.03381509873860672},"within":0.01907015790403527,"between":0.022360770568439478},{"round":20,"calls":889,"spent":0.1839791,"spread":{"GPT":0.08085489804121343,"Claude":0.03230274272541753},"within":0.01797171645143134,"between":0.02100394845970299},{"round":21,"calls":927,"spent":0.19458280000000008,"spread":{"GPT":0.07809042101600208,"Claude":0.0391481844525083},"within":0.019124494098395853,"between":0.020906908008109945},{"round":22,"calls":983,"spent":0.2041996000000001,"spread":{"GPT":0.08369787854915384,"Claude":0.03733329978328739},"within":0.019831777004895978,"between":0.02062018719867272},{"round":23,"calls":1017,"spent":0.21196080000000006,"spread":{"GPT":0.09720940853560157,"Claude":0.03632898781432079},"within":0.02258324108389818,"between":0.024548013892331487},{"round":24,"calls":1065,"spent":0.22175450000000005,"spread":{"GPT":0.09882090961566263,"Claude":0.0348776345982276},"within":0.02175125730971367,"between":0.02503969476369532},{"round":25,"calls":1104,"spent":0.2302470000000001,"spread":{"GPT":0.09576760640340054,"Claude":0.0339152357554013},"within":0.020932114563848057,"between":0.02409662651873842},{"round":26,"calls":1149,"spent":0.23858100000000004,"spread":{"GPT":0.0971869225034917,"Claude":0.03283336659937856},"within":0.021289934413179227,"between":0.024321452202949668},{"round":27,"calls":1208,"spent":0.24922300000000008,"spread":{"GPT":0.0995535796497945,"Claude":0.03158132215344335},"within":0.02165726554646689,"between":0.024230413430320997},{"round":28,"calls":1241,"spent":0.2566898000000001,"spread":{"GPT":0.09720646156207663,"Claude":0.03087828804711456},"within":0.020954691880089693,"between":0.0234696712863746},{"round":29,"calls":1292,"spent":0.2676955000000001,"spread":{"GPT":0.0992996114088391,"Claude":0.0299203473603908},"within":0.021426081837305197,"between":0.023641509059333394},{"round":30,"calls":1348,"spent":0.2782282000000001,"spread":{"GPT":0.0995284893930723,"Claude":0.02895780112053289},"within":0.02146337364337754,"between":0.02380575868236577},{"round":31,"calls":1385,"spent":0.2867175000000001,"spread":{"GPT":0.09725831341531455,"Claude":0.028310100411851474},"within":0.02083241857678863,"between":0.023106069011446656},{"round":32,"calls":1423,"spent":0.2953874000000001,"spread":{"GPT":0.09526053278855752,"Claude":0.027632730816111218},"within":0.020246045308006878,"between":0.0224768462243125},{"round":33,"calls":1472,"spent":0.30395670000000014,"spread":{"GPT":0.09631478620735319,"Claude":0.026932481418778333},"within":0.02056703982696815,"between":0.022707371946122743},{"round":34,"calls":1523,"spent":0.31423020000000007,"spread":{"GPT":0.10118584491567365,"Claude":0.026162288253627493},"within":0.020664400932309476,"between":0.02324180996432679},{"round":35,"calls":1572,"spent":0.3242244,"spread":{"GPT":0.10190856101007098,"Claude":0.025538855821764038},"within":0.020298157366084302,"between":0.02315251662324217},{"round":36,"calls":1618,"spent":0.3329570000000001,"spread":{"GPT":0.09946626415983693,"Claude":0.024946573728351587},"within":0.019807305207317424,"between":0.022579901239097883},{"round":37,"calls":1661,"spent":0.3429078000000001,"spread":{"GPT":0.1004587007848262,"Claude":0.024429013832192092},"within":0.019915313479939446,"between":0.0227843332110789},{"round":38,"calls":1705,"spent":0.3515478000000001,"spread":{"GPT":0.09846012537039109,"Claude":0.023890104725956172},"within":0.019440580391911735,"between":0.02223974726625123},{"round":39,"calls":1757,"spent":0.3616872000000001,"spread":{"GPT":0.10174066647396744,"Claude":0.023334395475959085},"within":0.019938603321996175,"between":0.02298842542223964},{"round":40,"calls":1798,"spent":0.3699485,"spread":{"GPT":0.09996342248626476,"Claude":0.02284552683901782},"within":0.01960446168246406,"between":0.022598626075260204},{"round":41,"calls":1843,"spent":0.3797998,"spread":{"GPT":0.10223844680281272,"Claude":0.022378175910262664},"within":0.020375395533502545,"between":0.023302668676968456},{"round":42,"calls":1883,"spent":0.3882496000000001,"spread":{"GPT":0.10204844673237866,"Claude":0.021967454051343177},"within":0.020475278603469232,"between":0.023309004785517937},{"round":43,"calls":1922,"spent":0.39754520000000004,"spread":{"GPT":0.09945498729404573,"Claude":0.021572608729298892},"within":0.019848151824346422,"between":0.02254418646193177},{"round":44,"calls":1977,"spent":0.4082121999999999,"spread":{"GPT":0.09610071986806244,"Claude":0.021058108118334178},"within":0.019085021742018784,"between":0.021625003896807618},{"round":45,"calls":2014,"spent":0.4163352000000001,"spread":{"GPT":0.09648091548431328,"Claude":0.020697236219028987},"within":0.01918723271212085,"between":0.021752556080439904},{"round":46,"calls":2052,"spent":0.4238634,"spread":{"GPT":0.09757907596076479,"Claude":0.020318398020887876},"within":0.01934349184196596,"between":0.021854503739951125},{"round":47,"calls":2090,"spent":0.43257239999999997,"spread":{"GPT":0.09777818939461067,"Claude":0.019983969856166645},"within":0.019071720828902173,"between":0.021790641907146656},{"round":48,"calls":2141,"spent":0.4436265,"spread":{"GPT":0.0950368369677769,"Claude":0.024044485887032983},"within":0.019371934432989044,"between":0.02144457230597144},{"round":49,"calls":2181,"spent":0.4522627999999999,"spread":{"GPT":0.09508069791364347,"Claude":0.023632535797520036},"within":0.019462046769891675,"between":0.021499235901531008},{"round":50,"calls":2220,"spent":0.4611034999999999,"spread":{"GPT":0.09725984810321155,"Claude":0.023235464504104558},"within":0.02006189518063886,"between":0.022145545823109992},{"round":51,"calls":2250,"spent":0.46727720000000006,"spread":{"GPT":0.09576257471435383,"Claude":0.02278994008027962},"within":0.019664679701923444,"between":0.021717040707516014},{"round":52,"calls":2268,"spent":0.47221159999999995,"spread":{"GPT":0.09494221804703286,"Claude":0.022513086232349322},"within":0.019420961571531472,"between":0.021472514209815764},{"round":53,"calls":2297,"spent":0.47848479999999993,"spread":{"GPT":0.0955523647544938,"Claude":0.022154984523806303},"within":0.019609479737912303,"between":0.021710624759392175},{"round":54,"calls":2320,"spent":0.48402189999999995,"spread":{"GPT":0.09458359751465605,"Claude":0.02180889889029447},"within":0.019307199902817006,"between":0.02139153253526891},{"round":55,"calls":2350,"spent":0.49127269999999984,"spread":{"GPT":0.09489166658249931,"Claude":0.021474219576010433},"within":0.019152681338003883,"between":0.021439553521905644},{"round":56,"calls":2369,"spent":0.4984061999999999,"spread":{"GPT":0.09593827397098445,"Claude":0.024594215518214616},"within":0.020148177140955896,"between":0.021828212888251857},{"round":57,"calls":2398,"spent":0.5039757,"spread":{"GPT":0.09467414683877225,"Claude":0.024171463159628304},"within":0.019723482062069222,"between":0.021396427439476784},{"round":58,"calls":2424,"spent":0.5130132,"spread":{"GPT":0.09691266227842554,"Claude":0.02698401753923679},"within":0.020951964196522576,"between":0.022284918548343764},{"round":59,"calls":2461,"spent":0.5202441999999999,"spread":{"GPT":0.0968693585349983,"Claude":0.02647631322237054},"within":0.021003451094208352,"between":0.02231699076588677},{"round":60,"calls":2486,"spent":0.5265655999999999,"spread":{"GPT":0.09756938878823893,"Claude":0.026169305662864104},"within":0.0210758315735054,"between":0.022435113905433134},{"round":61,"calls":2517,"spent":0.5337447999999999,"spread":{"GPT":0.09841590811928846,"Claude":0.0257814662838264},"within":0.021170721454103845,"between":0.022472476371591523},{"round":62,"calls":2541,"spent":0.5402276999999999,"spread":{"GPT":0.09890667030063435,"Claude":0.02549144168965522},"within":0.021283164566939388,"between":0.02259214435711454},{"round":63,"calls":2566,"spent":0.5464031,"spread":{"GPT":0.09788784243149862,"Claude":0.025152545147228682},"within":0.020994547992616727,"between":0.02228940085418542},{"round":64,"calls":2590,"spent":0.5516437999999999,"spread":{"GPT":0.09696748703059747,"Claude":0.024823202999290077},"within":0.020723955964080543,"between":0.022026095283095737},{"round":65,"calls":2621,"spent":0.5580259999999999,"spread":{"GPT":0.09562178532294323,"Claude":0.024476723881736332},"within":0.0203937376846396,"between":0.021668149267858934},{"round":66,"calls":2644,"spent":0.5641787,"spread":{"GPT":0.09690762237033625,"Claude":0.02416600046977872},"within":0.02032048515606844,"between":0.021768248803523464},{"round":67,"calls":2667,"spent":0.5698341,"spread":{"GPT":0.09777008834712869,"Claude":0.023888529013813987},"within":0.020526157595581986,"between":0.022026224237094154},{"round":68,"calls":2700,"spent":0.5775275999999999,"spread":{"GPT":0.09935488467868911,"Claude":0.023545135690917186},"within":0.021086356943849378,"between":0.02259446169285026},{"round":69,"calls":2723,"spent":0.5828099999999999,"spread":{"GPT":0.09985666473914874,"Claude":0.02330627955856168},"within":0.021150720089576882,"between":0.022676082442899523},{"round":70,"calls":2751,"spent":0.5897347,"spread":{"GPT":0.10012292042043051,"Claude":0.023026438264094912},"within":0.021047638540835467,"between":0.02274471181594021},{"round":71,"calls":2777,"spent":0.5957871,"spread":{"GPT":0.09912733074730645,"Claude":0.02275372557413593},"within":0.020799961864173246,"between":0.022483170014287283},{"round":72,"calls":2805,"spent":0.6020224999999999,"spread":{"GPT":0.09801562627099707,"Claude":0.02248786554717191},"within":0.02038113898059709,"between":0.02203296904301074},{"round":73,"calls":2831,"spent":0.6091927,"spread":{"GPT":0.09706494845099234,"Claude":0.024732014430649613},"within":0.02077549702687416,"between":0.021950494038977142},{"round":74,"calls":2857,"spent":0.6150014,"spread":{"GPT":0.09772663744282942,"Claude":0.024452037647847962},"within":0.020907047301072415,"between":0.022124987760138957},{"round":75,"calls":2886,"spent":0.6210856,"spread":{"GPT":0.09815676405408044,"Claude":0.024178797820293113},"within":0.02104199574235682,"between":0.02229049525551101},{"round":76,"calls":2913,"spent":0.6280005000000001,"spread":{"GPT":0.09717539724652006,"Claude":0.026256183283256573},"within":0.02125834876227918,"between":0.022092893825222476},{"round":77,"calls":2943,"spent":0.6342703000000001,"spread":{"GPT":0.09602562418689238,"Claude":0.025971505865998352},"within":0.021015354717891482,"between":0.021832357662147178},{"round":78,"calls":2969,"spent":0.6402449,"spread":{"GPT":0.09767922204685352,"Claude":0.025716330307080475},"within":0.02122521980871456,"between":0.022198432346735297},{"round":79,"calls":3000,"spent":0.6471494000000002,"spread":{"GPT":0.0965554754889048,"Claude":0.02542163502120129},"within":0.02093122392628904,"between":0.0218766224531455},{"round":80,"calls":3025,"spent":0.6528909,"spread":{"GPT":0.09870184297228483,"Claude":0.025177898877986722},"within":0.0212510722766031,"between":0.02234498873349349},{"round":81,"calls":3054,"spent":0.6588693,"spread":{"GPT":0.09771638929226653,"Claude":0.024896256325414437},"within":0.02098267970178681,"between":0.02206536334432658},{"round":82,"calls":3083,"spent":0.6649898000000004,"spread":{"GPT":0.09669257910745584,"Claude":0.024642232453120055},"within":0.02066487609182899,"between":0.02173173716943571},{"round":83,"calls":3109,"spent":0.6714249000000001,"spread":{"GPT":0.09586683548685343,"Claude":0.024393727542296455},"within":0.020444267179703556,"between":0.02149228856620441},{"round":84,"calls":3146,"spent":0.6794354000000002,"spread":{"GPT":0.09719405752582232,"Claude":0.0240905799117965},"within":0.020806745930262664,"between":0.02187602671017978},{"round":85,"calls":3166,"spent":0.6842726000000003,"spread":{"GPT":0.0965584583301265,"Claude":0.023912551953892927},"within":0.020651949770182528,"between":0.021731366090934304},{"round":86,"calls":3195,"spent":0.6907235000000003,"spread":{"GPT":0.0956499622493058,"Claude":0.02366034243061146},"within":0.0203538906194778,"between":0.021416443261283946},{"round":87,"calls":3225,"spent":0.6967500000000002,"spread":{"GPT":0.09605102937930769,"Claude":0.023413792157181007},"within":0.020432495287087574,"between":0.021519997491042733},{"round":88,"calls":3249,"spent":0.7025557000000002,"spread":{"GPT":0.0965968293921697,"Claude":0.023227867288917747},"within":0.02064180585781203,"between":0.021753334280641527},{"round":89,"calls":3277,"spent":0.7088754000000002,"spread":{"GPT":0.09701028351591752,"Claude":0.023008907755202083},"within":0.020712694857551006,"between":0.021839297411509032},{"round":90,"calls":3299,"spent":0.7146755000000002,"spread":{"GPT":0.09767849497666974,"Claude":0.02281205934643485},"within":0.02087847738716651,"between":0.022031255140339424},{"round":91,"calls":3332,"spent":0.7213300000000002,"spread":{"GPT":0.09659194582933571,"Claude":0.022584040184357106},"within":0.02059379210568679,"between":0.021725873727461716},{"round":92,"calls":3360,"spent":0.7274690000000003,"spread":{"GPT":0.09579416579965178,"Claude":0.02236087027973595},"within":0.020401394087142158,"between":0.021524553308444286},{"round":93,"calls":3393,"spent":0.7355437000000001,"spread":{"GPT":0.09597305585250585,"Claude":0.022142392533400668},"within":0.020513376666305816,"between":0.021631792192926137},{"round":94,"calls":3415,"spent":0.7411406000000003,"spread":{"GPT":0.09753650403080241,"Claude":0.021977430976889648},"within":0.02074556766733221,"between":0.022011413725188132},{"round":95,"calls":3445,"spent":0.7481359000000003,"spread":{"GPT":0.09660294373205097,"Claude":0.021782931936017956},"within":0.02051031667281473,"between":0.021756542258136117},{"round":96,"calls":3475,"spent":0.7546980000000003,"spread":{"GPT":0.09686720056036531,"Claude":0.02159209844722881},"within":0.02054093145677533,"between":0.02178775436316488},{"round":97,"calls":3504,"spent":0.7610863000000002,"spread":{"GPT":0.09601111321926847,"Claude":0.02140482515703331},"within":0.020355566088927936,"between":0.021586421014505787},{"round":98,"calls":3527,"spent":0.7667589000000002,"spread":{"GPT":0.0954659092414581,"Claude":0.021221010765626134},"within":0.020181539718094194,"between":0.021409525851889294},{"round":99,"calls":3554,"spent":0.7732678000000002,"spread":{"GPT":0.09587056952103416,"Claude":0.0210108025156742},"within":0.02011649524297766,"between":0.021453628104101067},{"round":100,"calls":3587,"spent":0.7803843000000003,"spread":{"GPT":0.09490089091657465,"Claude":0.020819576205541028},"within":0.019902259418903938,"between":0.021215149023662866},{"round":101,"calls":3606,"spent":0.7853262000000003,"spread":{"GPT":0.09555125372216287,"Claude":0.02068936477942436},"within":0.020103832877491384,"between":0.021444212611901218},{"round":102,"calls":3629,"spent":0.7915931000000003,"spread":{"GPT":0.09599228261928988,"Claude":0.02233548893418225},"within":0.020637878520744713,"between":0.021681936785687347},{"round":103,"calls":3662,"spent":0.7988871000000003,"spread":{"GPT":0.09614634767782587,"Claude":0.022138260407769998},"within":0.020697690281650912,"between":0.021736502705203484},{"round":104,"calls":3685,"spent":0.8045210000000002,"spread":{"GPT":0.09558273208026542,"Claude":0.02197427741730842},"within":0.02048995002052647,"between":0.021526609613589022},{"round":105,"calls":3714,"spent":0.8107637000000001,"spread":{"GPT":0.09479649752644684,"Claude":0.02179834093186675},"within":0.02028959709887147,"between":0.021317868624473234},{"round":106,"calls":3745,"spent":0.8187874000000003,"spread":{"GPT":0.09534123771196998,"Claude":0.023315248264492598},"within":0.02056615999130724,"between":0.021395658568966913},{"round":107,"calls":3779,"spent":0.825828,"spread":{"GPT":0.0953603389658008,"Claude":0.0231177121063529},"within":0.020505321111667585,"between":0.021416541461446358},{"round":108,"calls":3800,"spent":0.8309938000000002,"spread":{"GPT":0.09491205587934444,"Claude":0.022953358809034315},"within":0.020314769018596256,"between":0.021228903491770278},{"round":109,"calls":3833,"spent":0.8397121000000001,"spread":{"GPT":0.09493298042929882,"Claude":0.02440639326507192},"within":0.020647229824107338,"between":0.021360133672760795},{"round":110,"calls":3861,"spent":0.8458878000000001,"spread":{"GPT":0.09521222857488049,"Claude":0.024205770931976026},"within":0.019665629355696514,"between":0.021103530146833794},{"round":111,"calls":3884,"spent":0.8541008999999999,"spread":{"GPT":0.09464679249494529,"Claude":0.024053847797076273},"within":0.01947751879303295,"between":0.02090400146524547},{"round":112,"calls":3911,"spent":0.8601476000000001,"spread":{"GPT":0.09492142027163855,"Claude":0.023874230280413303},"within":0.019535878663252532,"between":0.020975108863934607},{"round":113,"calls":3940,"spent":0.8668106,"spread":{"GPT":0.09423960653071964,"Claude":0.02523415125989683},"within":0.019737547240371234,"between":0.02091261919081506},{"round":114,"calls":3965,"spent":0.8738430000000001,"spread":{"GPT":0.09361003141887549,"Claude":0.026593382426156012},"within":0.019938298869702505,"between":0.02086567429959963},{"round":115,"calls":4003,"spent":0.8811258000000001,"spread":{"GPT":0.09270306137895803,"Claude":0.026337437328033207},"within":0.019718435468696702,"between":0.020622721968343267},{"round":116,"calls":4029,"spent":0.8874844999999999,"spread":{"GPT":0.09205538230746232,"Claude":0.02764484359167856},"within":0.01988468732722637,"between":0.020561551009771015},{"round":117,"calls":4066,"spent":0.8949545,"spread":{"GPT":0.09118075643697274,"Claude":0.02740042954422267},"within":0.019672600566756876,"between":0.020327698551976713},{"round":118,"calls":4083,"spent":0.9002591,"spread":{"GPT":0.09272501089093856,"Claude":0.02725600862604832},"within":0.019711128803597273,"between":0.02073833780867568},{"round":119,"calls":4112,"spent":0.9068290999999998,"spread":{"GPT":0.09205398975853986,"Claude":0.027065985737255622},"within":0.019543762769176083,"between":0.020564212471570236},{"round":120,"calls":4138,"spent":0.9134482999999999,"spread":{"GPT":0.09246966248386515,"Claude":0.02687880247543526},"within":0.019665970781461675,"between":0.020703153491705616},{"round":121,"calls":4164,"spent":0.9195484999999999,"spread":{"GPT":0.09188811275785627,"Claude":0.02670965683519806},"within":0.01949391433382406,"between":0.020524087121113914},{"round":122,"calls":4197,"spent":0.9272694,"spread":{"GPT":0.09295166625677184,"Claude":0.026497676052570723},"within":0.019704072217822628,"between":0.020804610847848574},{"round":123,"calls":4228,"spent":0.9339906999999998,"spread":{"GPT":0.09318875931338373,"Claude":0.026304063221676503},"within":0.01976627363284739,"between":0.020877000616891073},{"round":124,"calls":4248,"spent":0.9392598,"spread":{"GPT":0.09276990887609775,"Claude":0.026171802952720362},"within":0.019630472905238238,"between":0.020740456853465497},{"round":125,"calls":4278,"spent":0.9451519999999999,"spread":{"GPT":0.09303833006263958,"Claude":0.02598327518997645},"within":0.0197002348136001,"between":0.020819729252149716},{"round":126,"calls":4307,"spent":0.9518356999999998,"spread":{"GPT":0.09329753883496769,"Claude":0.02581183273612005},"within":0.019788059049983178,"between":0.020911353609589515},{"round":127,"calls":4332,"spent":0.9575445999999999,"spread":{"GPT":0.09281353237743468,"Claude":0.02564281452002256},"within":0.01965716764905445,"between":0.020777382552103613},{"round":128,"calls":4360,"spent":0.9640855999999997,"spread":{"GPT":0.0930409978245069,"Claude":0.025476168054496703},"within":0.019644498068172905,"between":0.020824577357895765},{"round":129,"calls":4384,"spent":0.9700889999999995,"spread":{"GPT":0.09252884018851484,"Claude":0.025339070943453407},"within":0.019488964220385745,"between":0.020663547941753825},{"round":130,"calls":4417,"spent":0.9766217999999998,"spread":{"GPT":0.09184351874882614,"Claude":0.025149788002374728},"within":0.019299214124670203,"between":0.02045963732766683},{"round":131,"calls":4450,"spent":0.9833919999999994,"spread":{"GPT":0.09113397708142838,"Claude":0.02497673647095367},"within":0.019095619760146624,"between":0.0202385044072489},{"round":132,"calls":4475,"spent":0.9889094999999996,"spread":{"GPT":0.09064436353922053,"Claude":0.024832302224889462},"within":0.018972975541885838,"between":0.020114659857781835},{"round":133,"calls":4499,"spent":0.9948990999999995,"spread":{"GPT":0.09265477504693694,"Claude":0.02467677873008665},"within":0.019409493916294904,"between":0.02064379309042147},{"round":134,"calls":4526,"spent":1.0014662999999993,"spread":{"GPT":0.09212902350349361,"Claude":0.02452334225236829},"within":0.019306031638852562,"between":0.020530210118462726},{"round":135,"calls":4554,"spent":1.0070686999999994,"spread":{"GPT":0.09157534277456468,"Claude":0.024371949902320455},"within":0.019114208184678114,"between":0.020330936150512804},{"round":136,"calls":4585,"spent":1.0145946999999993,"spread":{"GPT":0.09172724104548755,"Claude":0.024210199921636963},"within":0.01907805715388383,"between":0.020340241447723974},{"round":137,"calls":4608,"spent":1.0209785999999992,"spread":{"GPT":0.09131959513517846,"Claude":0.02533946258960066},"within":0.019272767951284995,"between":0.020336691069855122},{"round":138,"calls":4639,"spent":1.0277482999999994,"spread":{"GPT":0.09143609912430423,"Claude":0.025186730078230656},"within":0.019294879826552928,"between":0.020362591013785545},{"round":139,"calls":4663,"spent":1.033325999999999,"spread":{"GPT":0.09103549416816824,"Claude":0.02503597151771872},"within":0.019201522425096224,"between":0.020270499869199675},{"round":140,"calls":4701,"spent":1.041889999999999,"spread":{"GPT":0.09133909228927758,"Claude":0.024850239738730996},"within":0.01912235821988235,"between":0.020236051625371655},{"round":141,"calls":4722,"spent":1.0471548999999991,"spread":{"GPT":0.09094482147969482,"Claude":0.024740220942282558},"within":0.019007308527465183,"between":0.020120090175360848},{"round":142,"calls":4747,"spent":1.0530077999999992,"spread":{"GPT":0.09132860332140674,"Claude":0.02459515383962842},"within":0.019097048746560815,"between":0.020222050431301312},{"round":143,"calls":4784,"spent":1.0604285999999992,"spread":{"GPT":0.09207204452821502,"Claude":0.02441638041300792},"within":0.018723836211874945,"between":0.020245544707753478},{"round":144,"calls":4804,"spent":1.065692499999999,"spread":{"GPT":0.09243471296885103,"Claude":0.024310455627879746},"within":0.018793588706350475,"between":0.02033407636378019},{"round":145,"calls":4831,"spent":1.071640199999999,"spread":{"GPT":0.0919498656501653,"Claude":0.02417075517090847},"within":0.018686835429039168,"between":0.020219857259576784},{"round":146,"calls":4859,"spent":1.078261399999999,"spread":{"GPT":0.09244704672366398,"Claude":0.02565395259931529},"within":0.01900550241912956,"between":0.020342373940910423},{"round":147,"calls":4884,"spent":1.0849029999999988,"spread":{"GPT":0.09203176092276254,"Claude":0.02550834267899407},"within":0.01888818955119973,"between":0.020215346263496706},{"round":148,"calls":4917,"spent":1.091609999999999,"spread":{"GPT":0.0927993459701183,"Claude":0.02535259621487205},"within":0.018631530343939336,"between":0.020291848621959586},{"round":149,"calls":4943,"spent":1.098070699999999,"spread":{"GPT":0.0943874145662204,"Claude":0.025222403184017812},"within":0.018942735970224944,"between":0.020709221296771243},{"round":150,"calls":4970,"spent":1.1038626999999988,"spread":{"GPT":0.09390967400277775,"Claude":0.025082008422641192},"within":0.0188370405407527,"between":0.02059718720824435},{"round":151,"calls":5003,"spent":1.1107571999999988,"spread":{"GPT":0.09328082914500362,"Claude":0.024931802818160362},"within":0.018681806328839538,"between":0.020420829131738993},{"round":152,"calls":5028,"spent":1.1172299999999986,"spread":{"GPT":0.09287698038802399,"Claude":0.024794862195179065},"within":0.018548139565606702,"between":0.020273282284139348},{"round":153,"calls":5040,"spent":1.1212334999999984,"spread":{"GPT":0.09287698038802399,"Claude":0.024659533215147283},"within":0.01851684163268538,"between":0.020263567981802632},{"round":154,"calls":5056,"spent":1.1255969999999986,"spread":{"GPT":0.09287698038802399,"Claude":0.02448155144508527},"within":0.018465590013120887,"between":0.020247867773397567},{"round":155,"calls":5063,"spent":1.1288704999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.024404551969137295},"within":0.01845547374680114,"between":0.02024479951842059},{"round":156,"calls":5074,"spent":1.1327694999999987,"spread":{"GPT":0.09287698038802399,"Claude":0.024284601755373888},"within":0.0184253878370722,"between":0.020235734912864782},{"round":157,"calls":5087,"spent":1.1367174999999985,"spread":{"GPT":0.09287698038802399,"Claude":0.024144470124174932},"within":0.018395690321679706,"between":0.0202268766773508},{"round":158,"calls":5100,"spent":1.1412309999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.024006069976495174},"within":0.01836637372738612,"between":0.0202182199554128},{"round":159,"calls":5112,"spent":1.1453144999999987,"spread":{"GPT":0.09287698038802399,"Claude":0.02387982446209642},"within":0.018337430771471968,"between":0.020209760028007236},{"round":160,"calls":5127,"spent":1.1496779999999984,"spread":{"GPT":0.09287698038802399,"Claude":0.023724014755705184},"within":0.018299409136133166,"between":0.020198778341328584},{"round":161,"calls":5135,"spent":1.1530914999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.0236418083727581},"within":0.01828063756052156,"between":0.020193412340090623},{"round":162,"calls":5148,"spent":1.1570849999999986,"spread":{"GPT":0.09287698038802399,"Claude":0.023509523932912148},"within":0.018252773639466566,"between":0.020185515787775755},{"round":163,"calls":5159,"spent":1.1610384999999985,"spread":{"GPT":0.09287698038802399,"Claude":0.023398829907727032},"within":0.01822525601378681,"between":0.020177798437992535},{"round":164,"calls":5169,"spent":1.1656329999999986,"spread":{"GPT":0.09287698038802399,"Claude":0.024380472238321873},"within":0.018458840931855056,"between":0.020243427879749212},{"round":165,"calls":5183,"spent":1.1696254999999984,"spread":{"GPT":0.09287698038802399,"Claude":0.024236404241619044},"within":0.01843037497886354,"between":0.020234840342035754},{"round":166,"calls":5198,"spent":1.1737589999999984,"spread":{"GPT":0.09287698038802399,"Claude":0.024084067789950595},"within":0.018402256590343332,"between":0.020226437613919585},{"round":167,"calls":5207,"spent":1.1773524999999985,"spread":{"GPT":0.09287698038802399,"Claude":0.023993652365663656},"within":0.01837447943893863,"between":0.020218215581288116},{"round":168,"calls":5219,"spent":1.1811759999999984,"spread":{"GPT":0.09287698038802399,"Claude":0.023874230280413303},"within":0.018347037349961823,"between":0.020210170240202028},{"round":169,"calls":5231,"spent":1.1849994999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.023756082193159393},"within":0.018319924296816847,"between":0.02020229769337583},{"round":170,"calls":5244,"spent":1.1889129999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.02362950194939318},"within":0.018293134396585146,"between":0.020194594146789632},{"round":171,"calls":5254,"spent":1.1926419999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.02353311704540426},"within":0.018266661905769418,"between":0.020187055906426846},{"round":172,"calls":5265,"spent":1.1972609999999984,"spread":{"GPT":0.09287698038802399,"Claude":0.023428067333754774},"within":0.018240501216187175,"between":0.020179679375131838},{"round":173,"calls":5279,"spent":1.2012534999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.02329581991975591},"within":0.018214646851009042,"between":0.020172461049583396},{"round":174,"calls":5291,"spent":1.2050769999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.02318373827411964},"within":0.018189093460935345,"between":0.02016539751737823},{"round":175,"calls":5304,"spent":1.2091904999999985,"spread":{"GPT":0.09287698038802399,"Claude":0.023063619995578648},"within":0.018163835820505198,"between":0.020158485454220453},{"round":176,"calls":5316,"spent":1.2130139999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.022953925280392393},"within":0.018138868824533232,"between":0.020151721621212416},{"round":177,"calls":5326,"spent":1.2168629999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.022863367789635842},"within":0.01811418748466886,"between":0.020145102862242924},{"round":178,"calls":5339,"spent":1.2206909999999984,"spread":{"GPT":0.09287698038802399,"Claude":0.02274678710840419},"within":0.018089786926072795,"between":0.02013862610146851},{"round":179,"calls":5349,"spent":1.2248054999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.022657977152235005},"within":0.018065662384206215,"between":0.020132288340884184},{"round":180,"calls":5366,"spent":1.2291279999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.022508701732929053},"within":0.018041809201728747,"between":0.02012608665798005},{"round":181,"calls":5378,"spent":1.2339114999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.023389033231391562},"within":0.018254231471377263,"between":0.020182536209495807},{"round":182,"calls":5387,"spent":1.237544999999998,"spread":{"GPT":0.09287698038802399,"Claude":0.023308409054601336},"within":0.01822957814345608,"between":0.0201756124382032},{"round":183,"calls":5401,"spent":1.2416684999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.023184177124350815},"within":0.018205197707599038,"between":0.020168829382142248},{"round":184,"calls":5414,"spent":1.2456219999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.02307008947148832},"within":0.01818108565743123,"between":0.02016218416947865},{"round":185,"calls":5422,"spent":1.249210999999998,"spread":{"GPT":0.09287698038802399,"Claude":0.02300048092807346},"within":0.01815723758526144,"between":0.020155673998539052},{"round":186,"calls":5436,"spent":1.2536089999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.022879748623386535},"within":0.018133649179395316,"between":0.02014929613576935},{"round":187,"calls":5447,"spent":1.2573824999999983,"spread":{"GPT":0.09287698038802399,"Claude":0.02278584099392996},"within":0.01811031622153589,"between":0.020143047913762445},{"round":188,"calls":5459,"spent":1.2613259999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.02268433868699492},"within":0.01808723458426825,"between":0.02013692672935259},{"round":189,"calls":5471,"spent":1.2654894999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.022583805658547694},"within":0.018064400228624804,"between":0.02013093004177385},{"round":190,"calls":5484,"spent":1.269442999999998,"spread":{"GPT":0.09287698038802399,"Claude":0.022475972224072875},"within":0.018041809201728747,"between":0.020125055370880277},{"round":191,"calls":5494,"spent":1.273351999999998,"spread":{"GPT":0.09287698038802399,"Claude":0.022393775053467117},"within":0.0180194576345122,"between":0.020119300295425076},{"round":192,"calls":5506,"spent":1.277135499999998,"spread":{"GPT":0.09287698038802399,"Claude":0.022295989020134015},"within":0.01799734173950664,"between":0.02011366245139707},{"round":193,"calls":5520,"spent":1.2819534999999982,"spread":{"GPT":0.09287698038802399,"Claude":0.0231073735684629},"within":0.018196728188843495,"between":0.02016653611236168},{"round":194,"calls":5531,"spent":1.2859069999999981,"spread":{"GPT":0.09287698038802399,"Claude":0.02301603180894597},"within":0.018173903716105447,"between":0.020160259657945098},{"round":195,"calls":5541,"spent":1.2897214999999977,"spread":{"GPT":0.09287698038802399,"Claude":0.022933666398130288},"within":0.018151316306432633,"between":0.020154104370560495},{"round":196,"calls":5555,"spent":1.293553999999998,"spread":{"GPT":0.09287698038802399,"Claude":0.02281941606191478},"within":0.018128962285353194,"between":0.020148067921930725},{"round":197,"calls":5569,"spent":1.2977774999999978,"spread":{"GPT":0.09287698038802399,"Claude":0.022706385400609864},"within":0.01810683805394832,"between":0.020142148037266737},{"round":198,"calls":5580,"spent":1.3015109999999976,"spread":{"GPT":0.09287698038802399,"Claude":0.02261841821741901},"within":0.018084940086920392,"between":0.02013634249380439},{"round":199,"calls":5591,"spent":1.306204499999998,"spread":{"GPT":0.09287698038802399,"Claude":0.02342280116806895},"within":0.018277968755277863,"between":0.020190230674406107},{"round":200,"calls":5600,"spent":1.3103144999999978,"spread":{"GPT":0.09287698038802399,"Claude":0.023349305685491505},"within":0.018255412324234204,"between":0.02018382354193073}]},{"k":100,"status":"idle","message":"","done":0,"target":5600,"per_min":0,"eta_s":null,"file":"data/test_1-100.json","quality":{"total":0,"clean":0,"extra":0,"unusable":0,"examples":[]},"round":0,"rounds":200,"history":[]},{"k":1000,"status":"idle","message":"","done":0,"target":5600,"per_min":0,"eta_s":null,"file":"data/test_1-1000.json","quality":{"total":0,"clean":0,"extra":0,"unusable":0,"examples":[]},"round":0,"rounds":200,"history":[]}],"providers":[{"id":"openai","name":"OpenAI","key":false,"spent":0.4289344999999957,"cap":50.0,"state":"idle","by_test":{"10":{"spent":0.4289344999999957,"projected":0.4289344999999957,"done":2800,"target":2800},"100":{"spent":0.0,"projected":0.4289344999999998,"done":0,"target":2800},"1000":{"spent":0.0,"projected":0.4289344999999998,"done":0,"target":2800}}},{"id":"anthropic","name":"Anthropic","key":false,"spent":0.8813799999999925,"cap":50.0,"state":"idle","by_test":{"10":{"spent":0.8813799999999925,"projected":0.8813799999999925,"done":2800,"target":2800},"100":{"spent":0.0,"projected":0.8813799999999982,"done":0,"target":2800},"1000":{"spent":0.0,"projected":0.8813799999999982,"done":0,"target":2800}}}],"ranges":[10,100,1000],"views":{"10":{"k":10,"bin_size":1,"uniform":{"mean":5.5,"sd":2.8722813232690143},"families":[{"family":"Python random (control)","control":true,"pooled":{"bins":[106,139,121,111,126,109,119,117,128,124],"stats":{"n":1200,"mean":5.53,"sd":2.886643481997757,"mode":2,"mode_share":0.11583333333333333,"entropy":0.9986724663206317,"entropy_ref":0.9983688884088033,"distinct":10,"chi2":7.383333333333334,"chi2_p":0.597274692860662},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"python-random","label":"random module","rows":[{"bins":[22,21,24,14,21,19,20,19,21,19],"stats":{"n":200,"mean":5.41,"sd":2.921399127870344,"mode":3,"mode_share":0.12,"entropy":0.99646233559153,"entropy_ref":0.9901343046037792,"distinct":10,"chi2":3.099999999999999,"chi2_p":0.9601978505188749},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"run 1","time":{"median":0.0,"p90":0.0},"rtok":0.0},{"bins":[12,19,22,22,21,14,24,25,18,23],"stats":{"n":200,"mean":5.765,"sd":2.7944264340786265,"mode":8,"mode_share":0.125,"entropy":0.9904614738944632,"entropy_ref":0.9901343046037792,"distinct":10,"chi2":8.2,"chi2_p":0.5141236202310764},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"run 2","time":{"median":0.0,"p90":0.0},"rtok":0.0},{"bins":[14,27,24,12,22,22,17,15,21,26],"stats":{"n":200,"mean":5.59,"sd":2.936839308785576,"mode":2,"mode_share":0.135,"entropy":0.9862831475263083,"entropy_ref":0.9901343046037792,"distinct":10,"chi2":12.2,"chi2_p":0.20226768540582493},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"run 3","time":{"median":0.0,"p90":0.0},"rtok":0.0}],"pooled":{"bins":[48,67,70,48,64,55,61,59,60,68],"stats":{"n":600,"mean":5.588333333333333,"sd":2.8837574998171758,"mode":3,"mode_share":0.11666666666666667,"entropy":0.9966453014890637,"entropy_ref":0.9967326832967123,"distinct":10,"chi2":9.066666666666666,"chi2_p":0.4311431821755696},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[]},{"id":"python-secrets","label":"secrets module","rows":[{"bins":[15,22,9,18,23,19,21,25,26,22],"stats":{"n":200,"mean":5.94,"sd":2.843735953082542,"mode":9,"mode_share":0.13,"entropy":0.9859723675700381,"entropy_ref":0.9901343046037792,"distinct":10,"chi2":11.500000000000002,"chi2_p":0.24298584456930353},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"run 1","time":{"median":0.0,"p90":0.0},"rtok":0.0},{"bins":[25,20,20,19,19,21,22,15,19,20],"stats":{"n":200,"mean":5.335,"sd":2.926705146589826,"mode":1,"mode_share":0.125,"entropy":0.9968273543425455,"entropy_ref":0.9901343046037792,"distinct":10,"chi2":2.9,"chi2_p":0.9681278591207836},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"run 2","time":{"median":0.0,"p90":0.0},"rtok":0.0},{"bins":[18,30,22,26,20,14,15,18,23,14],"stats":{"n":200,"mean":5.14,"sd":2.8550229033922783,"mode":2,"mode_share":0.15,"entropy":0.986533256278237,"entropy_ref":0.9901343046037792,"distinct":10,"chi2":12.7,"chi2_p":0.17665737664168246},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"run 3","time":{"median":0.0,"p90":0.0},"rtok":0.0}],"pooled":{"bins":[58,72,51,63,62,54,58,58,68,56],"stats":{"n":600,"mean":5.471666666666667,"sd":2.890753878408095,"mode":2,"mode_share":0.12,"entropy":0.9978252044248501,"entropy_ref":0.9967326832967123,"distinct":10,"chi2":6.099999999999999,"chi2_p":0.7298696452713578},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[]}]},{"family":"GPT","control":false,"pooled":{"bins":[0,0,0,56,0,11,2299,34,0,0],"stats":{"n":2400,"mean":6.939583333333333,"sd":0.47454573760527935,"mode":7,"mode_share":0.9579166666666666,"entropy":0.09287698038802399,"entropy_ref":0.9991850734360241,"distinct":4,"chi2":19640.891666666663,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"gpt-6-luna","label":"GPT-6 Luna","rows":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":1.055,"p90":1.848},"rtok":5.175},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":1.636,"p90":2.467},"rtok":15.385},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":2.139,"p90":3.064},"rtok":18.42}],"pooled":{"bins":[0,0,0,0,0,0,600,0,0,0],"stats":{"n":600,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9967326832967123,"distinct":1,"chi2":5400.0,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.1-terra","label":"GPT-6.1 Terra","rows":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":1.782,"p90":2.889},"rtok":0.0},{"bins":[0,0,0,15,0,1,174,10,0,0],"stats":{"n":200,"mean":6.82,"sd":0.8373204450138495,"mode":7,"mode_share":0.87,"entropy":0.21354530522894333,"entropy_ref":0.9901343046037792,"distinct":4,"chi2":1330.1,"chi2_p":9.751889265237595e-281},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":2.303,"p90":3.396},"rtok":13.365},{"bins":[0,0,0,19,0,6,155,20,0,0],"stats":{"n":200,"mean":6.785,"sd":0.9713354015537361,"mode":7,"mode_share":0.775,"entropy":0.32859380041357905,"entropy_ref":0.9901343046037792,"distinct":4,"chi2":1041.1,"chi2_p":2.3599674610111987e-218},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":2.632,"p90":3.58},"rtok":16.19}],"pooled":{"bins":[0,0,0,34,0,7,529,30,0,0],"stats":{"n":600,"mean":6.868333333333333,"sd":0.7451550054804323,"mode":7,"mode_share":0.8816666666666667,"entropy":0.2064718210374109,"entropy_ref":0.9967326832967123,"distinct":4,"chi2":4099.1,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.2-sol","label":"GPT-6.2 Sol","rows":[{"bins":[0,0,0,1,0,0,199,0,0,0],"stats":{"n":200,"mean":6.985,"sd":0.21213203435596426,"mode":7,"mode_share":0.995,"entropy":0.013671184636323079,"entropy_ref":0.9901343046037792,"distinct":2,"chi2":1780.1,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":0.914,"p90":1.134},"rtok":0.0},{"bins":[0,0,0,1,0,0,198,1,0,0],"stats":{"n":200,"mean":6.99,"sd":0.2239436397150949,"mode":7,"mode_share":0.99,"entropy":0.0273314573050654,"entropy_ref":0.9901343046037792,"distinct":3,"chi2":1760.3,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":1.001,"p90":1.214},"rtok":0.0},{"bins":[0,0,0,1,0,0,199,0,0,0],"stats":{"n":200,"mean":6.985,"sd":0.21213203435596426,"mode":7,"mode_share":0.995,"entropy":0.013671184636323079,"entropy_ref":0.9901343046037792,"distinct":2,"chi2":1780.1,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":1.005,"p90":1.27},"rtok":0.0}],"pooled":{"bins":[0,0,0,3,0,0,596,1,0,0],"stats":{"n":600,"mean":6.986666666666666,"sd":0.21579272397779886,"mode":7,"mode_share":0.9933333333333333,"entropy":0.019021026101410484,"entropy_ref":0.9967326832967123,"distinct":3,"chi2":5320.4333333333325,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,1,0,0,199,0,0,0],"stats":{"n":200,"mean":6.985,"sd":0.21213203435596426,"mode":7,"mode_share":0.995,"entropy":0.013671184636323079,"entropy_ref":0.9901343046037792,"distinct":2,"chi2":1780.1,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.2-astra","label":"GPT-6.2 Astra","rows":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":1.684,"p90":2.347},"rtok":0.0},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":1.783,"p90":2.635},"rtok":0.0},{"bins":[0,0,0,19,0,4,174,3,0,0],"stats":{"n":200,"mean":6.71,"sd":0.8999720822023973,"mode":7,"mode_share":0.87,"entropy":0.2110725389202465,"entropy_ref":0.9901343046037792,"distinct":4,"chi2":1333.1,"chi2_p":2.1931402509178077e-281},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":1.764,"p90":2.62},"rtok":1.44}],"pooled":{"bins":[0,0,0,19,0,4,574,3,0,0],"stats":{"n":600,"mean":6.903333333333333,"sd":0.5364717066558988,"mode":7,"mode_share":0.9566666666666667,"entropy":0.09189900307695799,"entropy_ref":0.9967326832967123,"distinct":4,"chi2":4897.699999999999,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]}]},{"family":"Claude","control":false,"pooled":{"bins":[0,0,0,18,0,3,2379,0,0,0],"stats":{"n":2400,"mean":6.97625,"sd":0.261178789625158,"mode":7,"mode_share":0.99125,"entropy":0.023349305685491505,"entropy_ref":0.9991850734360241,"distinct":3,"chi2":21183.225000000002,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"claude-haiku-5-5","label":"Claude Haiku 5.5","rows":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":0.633,"p90":0.769},"rtok":0.0},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":0.641,"p90":0.725},"rtok":0.0},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":0.64,"p90":0.775},"rtok":0.0}],"pooled":{"bins":[0,0,0,0,0,0,600,0,0,0],"stats":{"n":600,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9967326832967123,"distinct":1,"chi2":5400.0,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-sonnet-5-5","label":"Claude Sonnet 5.5","rows":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":1.145,"p90":1.309},"rtok":0.0},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":1.14,"p90":1.297},"rtok":0.0},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":1.128,"p90":1.288},"rtok":0.0}],"pooled":{"bins":[0,0,0,0,0,0,600,0,0,0],"stats":{"n":600,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9967326832967123,"distinct":1,"chi2":5400.0,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-opus-5-5","label":"Claude Opus 5.5","rows":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":0.956,"p90":1.095},"rtok":0.0},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":0.971,"p90":1.143},"rtok":0.0},{"bins":[0,0,0,18,0,3,179,0,0,0],"stats":{"n":200,"mean":6.715,"sd":0.8645880885219679,"mode":7,"mode_share":0.895,"entropy":0.1645951886568843,"entropy_ref":0.9901343046037792,"distinct":3,"chi2":1418.7,"chi2_p":7.042423315881445e-300},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":1.044,"p90":1.689},"rtok":10.215}],"pooled":{"bins":[0,0,0,18,0,3,579,0,0,0],"stats":{"n":600,"mean":6.905,"sd":0.5161579522970973,"mode":7,"mode_share":0.965,"entropy":0.07212265495997022,"entropy_ref":0.9967326832967123,"distinct":3,"chi2":4992.900000000001,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-fable-5-2","label":"Claude Fable 5.2","rows":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"low","time":{"median":0.952,"p90":1.082},"rtok":0.0},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"medium","time":{"median":1.803,"p90":2.759},"rtok":24.175},{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"effort":"high","time":{"median":1.827,"p90":2.781},"rtok":24.49}],"pooled":{"bins":[0,0,0,0,0,0,600,0,0,0],"stats":{"n":600,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9967326832967123,"distinct":1,"chi2":5400.0,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,200,0,0,0],"stats":{"n":200,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9901343046037792,"distinct":1,"chi2":1800.0,"chi2_p":0.0},"done":200,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,50,0,0,0],"stats":{"n":50,"mean":7.0,"sd":0.0,"mode":7,"mode_share":1.0,"entropy":-0.0,"entropy_ref":0.9589756945181258,"distinct":1,"chi2":450.0,"chi2_p":2.867571263903745e-91},"done":50,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]}]}],"llm":{"bins":[0,0,0,74,0,14,4678,34,0,0],"stats":{"n":4800,"mean":6.957916666666667,"sd":0.38341833558103955,"mode":7,"mode_share":0.9745833333333334,"entropy":0.06145354565093173,"entropy_ref":0.9995926931234148,"distinct":4,"chi2":40805.23333333333,"chi2_p":0.0},"done":null,"target":null,"invalid":0,"disabled":null},"matrix":{"labels":["random module","secrets module","GPT-6 Luna","GPT-6.1 Terra","GPT-6.2 Sol","GPT-6.2 Astra","Claude Haiku 5.5","Claude Sonnet 5.5","Claude Opus 5.5","Claude Fable 5.2"],"families":["Python random (control)","Python random (control)","GPT","GPT","GPT","GPT","Claude","Claude","Claude","Claude"],"control":[true,true,false,false,false,false,false,false,false,false],"jsd":[[null,0.0047743194511393324,0.7554028506935672,0.6026230867749481,0.7360382116059034,0.6784356539006557,0.7554028506935672,0.7554028506935672,0.6972004346422765,0.7554028506935672],[0.0047743194511393324,null,0.7640792574142823,0.6028801163220334,0.7437581505392936,0.6817782244718413,0.7640792574142823,0.7640792574142823,0.7007350465335884,0.7640792574142823],[0.7554028506935672,0.7640792574142823,null,0.06185246050260842,0.0033413751267026702,0.022012827081810214,0.0,0.0,0.0177248594001303,0.0],[0.6026230867749481,0.6028801163220334,0.06185246050260842,null,0.04707126888248747,0.019603001991618792,0.06185246050260842,0.06185246050260842,0.030353961928680312,0.06185246050260842],[0.7360382116059034,0.7437581505392936,0.0033413751267026702,0.04707126888248747,null,0.012009436105191984,0.0033413751267026702,0.0033413751267026702,0.01062691552871832,0.0033413751267026702],[0.6784356539006557,0.6817782244718413,0.022012827081810214,0.019603001991618792,0.012009436105191984,null,0.022012827081810207,0.022012827081810207,0.002615451679998902,0.022012827081810207],[0.7554028506935672,0.7640792574142823,0.0,0.06185246050260842,0.0033413751267026702,0.022012827081810207,null,0.0,0.0177248594001303,0.0],[0.7554028506935672,0.7640792574142823,0.0,0.06185246050260842,0.0033413751267026702,0.022012827081810207,0.0,null,0.0177248594001303,0.0],[0.6972004346422765,0.7007350465335884,0.0177248594001303,0.030353961928680312,0.01062691552871832,0.002615451679998902,0.0177248594001303,0.0177248594001303,null,0.0177248594001303],[0.7554028506935672,0.7640792574142823,0.0,0.06185246050260842,0.0033413751267026702,0.022012827081810207,0.0,0.0,0.0177248594001303,null]],"wass":[[null,0.014444444444444439,0.2987037037037037,0.272962962962963,0.29685185185185187,0.28685185185185186,0.2987037037037037,0.2987037037037037,0.28814814814814815,0.2987037037037037],[0.014444444444444439,null,0.3038888888888889,0.27814814814814814,0.302037037037037,0.292037037037037,0.3038888888888889,0.3038888888888889,0.2933333333333333,0.3038888888888889],[0.2987037037037037,0.3038888888888889,null,0.02574074074074073,0.001851851851851856,0.011851851851851855,0.0,0.0,0.010555555555555556,0.0],[0.272962962962963,0.27814814814814814,0.02574074074074073,null,0.023888888888888876,0.01388888888888888,0.02574074074074073,0.02574074074074073,0.015185185185185178,0.02574074074074073],[0.29685185185185187,0.302037037037037,0.001851851851851856,0.023888888888888876,null,0.009999999999999997,0.001851851851851856,0.001851851851851856,0.009074074074074076,0.001851851851851856],[0.28685185185185186,0.292037037037037,0.011851851851851855,0.01388888888888888,0.009999999999999997,null,0.011851851851851855,0.011851851851851855,0.0012962962962962984,0.011851851851851855],[0.2987037037037037,0.3038888888888889,0.0,0.02574074074074073,0.001851851851851856,0.011851851851851855,null,0.0,0.010555555555555556,0.0],[0.2987037037037037,0.3038888888888889,0.0,0.02574074074074073,0.001851851851851856,0.011851851851851855,0.0,null,0.010555555555555556,0.0],[0.28814814814814815,0.2933333333333333,0.010555555555555556,0.015185185185185178,0.009074074074074076,0.0012962962962962984,0.010555555555555556,0.010555555555555556,null,0.010555555555555556],[0.2987037037037037,0.3038888888888889,0.0,0.02574074074074073,0.001851851851851856,0.011851851851851855,0.0,0.0,0.010555555555555556,null]],"test":{"jsd":{"within":0.018255412324234204,"between":0.02018382354193073,"p":0.2571428571428571,"splits":70,"models":8},"wass":{"within":0.009907407407407405,"between":0.009652777777777777,"p":0.2571428571428571,"splits":70,"models":8}},"noise":{"jsd":0.0047743194511393324,"wass":0.014444444444444439}}},"100":{"k":100,"bin_size":1,"uniform":{"mean":50.5,"sd":28.86607004772212},"families":[{"family":"Python random (control)","control":true,"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"python-random","label":"random module","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 2"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 3"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[]},{"id":"python-secrets","label":"secrets module","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 2"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 3"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[]}]},{"family":"GPT","control":false,"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"gpt-6-luna","label":"GPT-6 Luna","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.1-terra","label":"GPT-6.1 Terra","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.2-sol","label":"GPT-6.2 Sol","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.2-astra","label":"GPT-6.2 Astra","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]}]},{"family":"Claude","control":false,"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"claude-haiku-5-5","label":"Claude Haiku 5.5","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-sonnet-5-5","label":"Claude Sonnet 5.5","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-opus-5-5","label":"Claude Opus 5.5","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-fable-5-2","label":"Claude Fable 5.2","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]}]}],"llm":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"matrix":{"labels":["random module","secrets module","GPT-6 Luna","GPT-6.1 Terra","GPT-6.2 Sol","GPT-6.2 Astra","Claude Haiku 5.5","Claude Sonnet 5.5","Claude Opus 5.5","Claude Fable 5.2"],"families":["Python random (control)","Python random (control)","GPT","GPT","GPT","GPT","Claude","Claude","Claude","Claude"],"control":[true,true,false,false,false,false,false,false,false,false],"jsd":[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null]],"wass":[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null]],"test":{"jsd":null,"wass":null},"noise":{"jsd":null,"wass":null}}},"1000":{"k":1000,"bin_size":10,"uniform":{"mean":500.5,"sd":288.6749902572095},"families":[{"family":"Python random (control)","control":true,"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"python-random","label":"random module","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 2"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 3"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[]},{"id":"python-secrets","label":"secrets module","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 2"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"run 3"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[]}]},{"family":"GPT","control":false,"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"gpt-6-luna","label":"GPT-6 Luna","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.1-terra","label":"GPT-6.1 Terra","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.2-sol","label":"GPT-6.2 Sol","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"gpt-6.2-astra","label":"GPT-6.2 Astra","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]}]},{"family":"Claude","control":false,"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"models":[{"id":"claude-haiku-5-5","label":"Claude Haiku 5.5","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-sonnet-5-5","label":"Claude Sonnet 5.5","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-opus-5-5","label":"Claude Opus 5.5","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]},{"id":"claude-fable-5-2","label":"Claude Fable 5.2","rows":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"low"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"medium"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"effort":"high"}],"pooled":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"wording":[{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":200,"invalid":0,"disabled":null,"prompt_id":"main"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para1"},{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":0,"target":50,"invalid":0,"disabled":null,"prompt_id":"para2"}]}]}],"llm":{"bins":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"stats":{"n":0},"done":null,"target":null,"invalid":0,"disabled":null},"matrix":{"labels":["random module","secrets module","GPT-6 Luna","GPT-6.1 Terra","GPT-6.2 Sol","GPT-6.2 Astra","Claude Haiku 5.5","Claude Sonnet 5.5","Claude Opus 5.5","Claude Fable 5.2"],"families":["Python random (control)","Python random (control)","GPT","GPT","GPT","GPT","Claude","Claude","Claude","Claude"],"control":[true,true,false,false,false,false,false,false,false,false],"jsd":[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null]],"wass":[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null]],"test":{"jsd":null,"wass":null},"noise":{"jsd":null,"wass":null}}}},"recent":[],"issues":[],"data_file":"data/results.jsonl","prompts":{"main":"Pick a random number between 1 and {max}. Reply with only the number.","para1":"Give me a random integer from 1 to {max}, inclusive. Output just the number, nothing else.","para2":"I need one random whole number in the range 1-{max}. Answer with the number only."},"samples":{"main":200,"para":50,"para_effort":"low"},"repo":"https://github.com/diegocp01/llm-random-number-benchmark","snapshot_date":"18 Nov 2026"};</script>
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const pct = x => (x >= 0.995 ? '100' : x >= 0.1 ? (x * 100).toFixed(0) : (x * 100).toFixed(1)) + '%';
+const money = x => '$' + x.toFixed(2);
+
+const RAMP = ['#cde2fb','#b7d3f6','#9ec5f4','#86b6ef','#6da7ec','#5598e7','#3987e5','#2a78d6','#256abf','#1c5cab','#184f95','#104281','#0d366b']
+  .map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
+const RAMP_DARK = RAMP.slice().reverse();
+const darkMQ = matchMedia('(prefers-color-scheme: dark)');
+let emptyColor = '#efeeea';
+
+function rampRGB(t) {               // t in 0..1, low -> high; recedes toward the surface in both themes
+  const r = darkMQ.matches ? RAMP_DARK : RAMP, x = Math.max(0, Math.min(1, t)) * (r.length - 1);
+  const i = Math.floor(x), f = x - i, a = r[i], b = r[Math.min(r.length - 1, i + 1)];
+  return a.map((v, c) => Math.round(v + (b[c] - v) * f));
+}
+const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+let emptyRGB = [239, 238, 234];
+function heat(share) {              // sqrt scale; the faint end fades into the empty-cell colour
+  if (share <= 0) return emptyColor;
+  const t = Math.sqrt(Math.min(1, share)), c = rampRGB(t), a = Math.min(1, 0.3 + 2.8 * t);
+  return rgb(c.map((v, i) => Math.round(emptyRGB[i] + (v - emptyRGB[i]) * a)));
+}
+const inkOn = c => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 > 0.55 ? '#0b0b0b' : '#ffffff';
+
+// ?only=<element id> shows just that card, for clean figure exports
+const URLQ = new URLSearchParams(location.search);
+// A page built by build_site.py carries its data inline and is read-only: no server, no Run button.
+const STATIC = !!window.SNAPSHOT;
+if (STATIC) document.body.classList.add('static');
+if (URLQ.get('only')) {
+  const sec = (document.getElementById(URLQ.get('only')) || document.body).closest('section');
+  if (sec) { document.body.classList.add('only'); sec.classList.add('onlyshow'); if (URLQ.get('only') === 'share') sec.classList.add('solo'); }
+}
+let S = null, range = null, metric = 'jsd', sig = '', refs = {}, lastVersion = -1, lastKey = '';
+
+/* ---------- distribution strips ---------- */
+function drawStrip(cv) {
+  const d = cv._d; if (!d) return;
+  const w = cv.clientWidth, h = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (!w) return;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const nb = d.bins.length, cw = w / nb, gap = nb <= 10 ? 2 : (cw >= 4 ? 1 : 0);
+  for (let i = 0; i < nb; i++) {
+    const x0 = Math.round(i * cw), x1 = Math.round((i + 1) * cw) - gap;
+    ctx.fillStyle = heat(d.total ? d.bins[i] / d.total : 0);
+    ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h);
+    if (i === cv._hover) {
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--ink');
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x0 + .75, .75, Math.max(1, x1 - x0) - 1.5, h - 1.5);
+    }
+  }
+}
+function stripHover(e) {
+  const cv = e.currentTarget, d = cv._d; if (!d) return;
+  const r = cv.getBoundingClientRect(), nb = d.bins.length;
+  const i = Math.max(0, Math.min(nb - 1, Math.floor((e.clientX - r.left) / r.width * nb)));
+  cv._hover = i; drawStrip(cv);
+  const lo = i * d.size + 1, hi = Math.min(d.k, (i + 1) * d.size);
+  const tip = $('tip'); tip.textContent = '';
+  tip.append(el('strong', null, d.total ? pct(d.bins[i] / d.total) : 'no answers yet'),
+             el('span', null, d.size === 1 ? 'picked ' + lo : 'picked ' + lo + ' to ' + hi),
+             el('span', null, d.ideal ? 'expected share' : fmt(d.bins[i]) + ' of ' + fmt(d.total) + ' answers'));
+  tip.style.display = 'block';
+  const tw = tip.offsetWidth;
+  tip.style.left = Math.max(8, Math.min(window.innerWidth - tw - 8, e.clientX + 14)) + 'px';
+  tip.style.top = (e.clientY + 16) + 'px';
+}
+function stripLeave(e) { e.currentTarget._hover = null; drawStrip(e.currentTarget); $('tip').style.display = 'none'; }
+
+function addRow(parent, key, cls, model, effort) {
+  const row = el('div', 'row ' + (cls || ''));
+  const cv = el('canvas');
+  cv.addEventListener('pointermove', stripHover); cv.addEventListener('pointerleave', stripLeave);
+  const n = el('div', 'num'), top = el('div', 'num'), mean = el('div', 'num');
+  const spread = el('div', 'spread'), bar = el('div', 'sbar'), fill = el('i'), tick = el('b'), val = el('span', 'num');
+  bar.append(fill, tick); spread.append(bar, val);
+  row.append(el('div', null, model), el('div', 'eff', effort), cv, n, top, mean, spread);
+  parent.append(row);
+  refs[key] = { cv, n, top, mean, fill, tick, val };
+}
+
+function headRow(view, col2) {
+  const head = el('div', 'row head'), axis = el('div', 'axisl');
+  const nb = Math.ceil(view.k / view.bin_size);
+  const ticks = view.k <= 12 ? Array.from({ length: view.k }, (_, i) => i + 1)
+    : [1, view.k / 4, view.k / 2, view.k * 3 / 4, view.k].map(Math.round);
+  ticks.forEach((v, i) => {
+    const s = el('span', view.k > 12 && i === 0 ? 'l' : view.k > 12 && i === ticks.length - 1 ? 'r' : '', String(v));
+    const pos = view.k > 12 && i === 0 ? 0 : view.k > 12 && i === ticks.length - 1 ? 100 : (Math.floor((v - 1) / view.bin_size) + .5) / nb * 100;
+    s.style.left = pos + '%'; axis.append(s);
+  });
+  head.append(el('div', null, 'Model'), el('div', null, col2), axis, el('div', null, 'Answers'),
+              el('div', null, 'Top pick'), el('div', null, 'Mean ± SD'), el('div', null, 'Spread (1 = fully random)'));
+  return head;
+}
+function buildTable(view) {
+  const t = $('table'); t.textContent = ''; refs = {}; wsig = '';
+  t.append(headRow(view, 'Effort'));
+  addRow(t, 'ideal', 'ref', 'Perfectly random', '');
+  for (const fam of view.families) {
+    addRow(t, 'fam:' + fam.family, 'fam', fam.family + (fam.control ? ', pooled' : ' family, pooled'), '');
+    for (const m of fam.models) m.rows.forEach((r, i) => addRow(t, m.id + '|' + r.effort, i === 0 ? 'first' : '', i === 0 ? m.label : '', r.effort));
+  }
+}
+
+function fillRow(key, d, view) {
+  const r = refs[key]; if (!r) return;
+  const s = d.stats, dec = view.k <= 100 ? 1 : 0;
+  r.cv._d = { bins: d.bins, total: d.total != null ? d.total : s.n, size: view.bin_size, k: view.k, ideal: !!d.ideal };
+  drawStrip(r.cv);
+  if (d.disabled) { r.n.textContent = 'skipped'; r.n.title = d.disabled; }
+  else {
+    r.n.textContent = d.target != null ? d.done + '/' + d.target : (d.ideal ? '' : fmt(s.n));
+    r.n.title = d.invalid ? d.invalid + ' answers were not a valid number and are excluded' : '';
+  }
+  const has = d.ideal || s.n > 0;
+  r.top.textContent = d.ideal ? 'none' : has ? s.mode + ' · ' + pct(s.mode_share) : '';
+  r.mean.textContent = has ? s.mean.toFixed(dec) + ' ± ' + s.sd.toFixed(dec) : '';
+  r.fill.style.width = has ? (s.entropy * 100) + '%' : '0';
+  r.tick.style.display = has && !d.ideal ? '' : 'none';
+  if (has && !d.ideal) r.tick.style.left = (s.entropy_ref * 100) + '%';
+  r.val.textContent = has ? s.entropy.toFixed(2) : '';
+}
+
+function renderTable(view) {
+  const newSig = view.k + ':' + view.families.map(f => f.models.map(m => m.id + m.rows.map(r => r.effort)).join()).join();
+  if (newSig !== sig) { buildTable(view); sig = newSig; }
+  const nb = Math.ceil(view.k / view.bin_size);
+  fillRow('ideal', { ideal: true, bins: Array(nb).fill(1), total: nb,
+    stats: { mean: view.uniform.mean, sd: view.uniform.sd, entropy: 1 } }, view);
+  for (const fam of view.families) {
+    fillRow('fam:' + fam.family, fam.pooled, view);
+    for (const m of fam.models) for (const r of m.rows) fillRow(m.id + '|' + r.effort, r, view);
+  }
+}
+
+/* ---------- rewording check ---------- */
+let wsig = '';
+function renderWording(view) {
+  const fams = view.families.filter(f => !f.control), ids = Object.keys(S.prompts), extra = ids.filter(x => x !== 'main');
+  const lab = id => id === 'main' ? 'main' : 'reword ' + (extra.indexOf(id) + 1);
+  const t = $('wtable');
+  const sigNow = view.k + '|' + fams.map(f => f.models.map(m => m.id + ':' + m.wording.map(w => w.prompt_id).join()).join()).join('|');
+  if (sigNow !== wsig) {
+    wsig = sigNow; t.textContent = '';
+    t.append(headRow(view, 'Prompt'));
+    fams.forEach(f => {
+      const g = el('div', 'row fam'); g.append(el('div', null, f.family + ' family')); t.append(g);
+      f.models.forEach(m => m.wording.forEach((w, i) => addRow(t, 'w:' + m.id + '|' + w.prompt_id, i === 0 ? 'first' : '', i === 0 ? m.label : '', lab(w.prompt_id))));
+    });
+  }
+  let same = 0, total = 0;
+  fams.forEach(f => f.models.forEach(m => {
+    m.wording.forEach(w => fillRow('w:' + m.id + '|' + w.prompt_id, w, view));
+    const main = m.wording.find(w => w.prompt_id === 'main'), others = m.wording.filter(w => w.prompt_id !== 'main' && w.stats.n);
+    if (main && main.stats.n && others.length) { total++; if (others.every(w => w.stats.mode === main.stats.mode)) same++; }
+  }));
+  $('wsub').textContent = 'The same question asked ' + ids.length + ' ways, all at ' + S.samples.para_effort + ' reasoning effort: ' + S.samples.main
+    + ' answers per model for the main prompt and ' + S.samples.para + ' for each rewording. If the wording mattered, the strips of one model would differ.';
+  const pr = $('wprompts'); pr.textContent = '';
+  ids.forEach(id => { const d = el('div', null, lab(id) + ': '); d.append(el('q', null, S.prompts[id].replace('{max}', view.k))); pr.append(d); });
+  $('wsum').textContent = !total ? 'No rewording answers yet.'
+    : (same === total ? '\u2713 ' : '') + 'In ' + same + ' of ' + total + ' models the most picked number is the same for every wording.';
+}
+
+/* ---------- line charts ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+const sv = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+// GPT and Claude keep blue and orange whatever else is listed; the control is neutral grey
+function famColors(view) { let n = 0; return view.families.map(f => f.control ? 'var(--muted)' : 'var(--s' + (n++ % 2 + 1) + ')'); }
+function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
+function placeTip(e, nodes) {
+  const tip = $('tip'); tip.textContent = ''; tip.append(...nodes); tip.style.display = 'block';
+  tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8, e.clientX + 14)) + 'px';
+  tip.style.top = (e.clientY + 16) + 'px';
+}
+function tipRow(color, value, name) {
+  const r = el('div', 'tr'), k = el('i'); k.style.background = color;
+  r.append(k, el('strong', null, value), el('span', null, name)); return r;
+}
+function attachHover(box) {         // crosshair snaps to the nearest x position; one tooltip lists every series
+  box.addEventListener('pointermove', e => {
+    const g = box._g; if (!g) return;
+    box._hi = g.index(e.clientX - box.getBoundingClientRect().left); box._ev = e;
+    g.cross(box._hi); placeTip(e, g.tip(box._hi));
+  });
+  box.addEventListener('pointerleave', () => { box._hi = null; if (box._g) box._g.cross(null); $('tip').style.display = 'none'; });
+}
+function finishPlot(box, svg, g) {
+  box.textContent = ''; box.append(svg); box._g = g;
+  if (box._hi != null) { g.cross(box._hi); if ($('tip').style.display === 'block') placeTip(box._ev, g.tip(box._hi)); }
+}
+
+function renderFamLines(view) {
+  const box = $('famline'); if (!box._on) { attachHover(box); box._on = true; }
+  const fams = view.families, nb = Math.ceil(view.k / view.bin_size), uni = 1 / nb;
+  const cols = famColors(view), famColor = i => cols[i];
+  const shares = fams.map(f => { const n = f.pooled.stats.n || 0; return f.pooled.bins.map(b => n ? b / n : 0); });
+  const keys = $('famkeys'); keys.textContent = '';
+  fams.forEach((f, i) => { const s = el('span'), k = el('i'); k.style.background = famColor(i); s.append(k, f.control ? f.family + ', sampled' : f.family + ' family'); keys.append(s); });
+  { const s = el('span'), k = el('i'); k.style.cssText = 'background:var(--muted);height:1px'; s.append(k, 'truly random, in theory'); keys.append(s); }
+
+  const W = Math.max(320, box.clientWidth), H = 420, m = { l: 52, r: 18, t: 34, b: 30 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  let ymax = Math.max(uni * 1.8, ...shares.map(s => Math.max(...s)));
+  const step = niceStep(ymax / 4); ymax = Math.ceil(ymax / step - 1e-9) * step;
+  const x = i => m.l + (i + .5) / nb * pw, y = v => m.t + (1 - v / ymax) * ph;
+  const binLabel = i => view.bin_size === 1 ? String(i + 1) : (i * view.bin_size + 1) + '–' + Math.min(view.k, (i + 1) * view.bin_size);
+  const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Share of answers by number, one line per family' });
+  for (let v = 0; v <= ymax + 1e-9; v += step) {
+    svg.append(sv('line', { class: v ? 'g' : 'ax', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
+               sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, (v * 100).toFixed(step < 0.01 ? 1 : 0) + '%'));
+  }
+  const ticks = view.k <= 12 ? Array.from({ length: view.k }, (_, i) => i + 1) : [1, view.k / 4, view.k / 2, view.k * 3 / 4, view.k].map(Math.round);
+  ticks.forEach(v => svg.append(sv('text', { x: x(Math.floor((v - 1) / view.bin_size)), y: H - 8, 'text-anchor': 'middle' }, String(v))));
+  svg.append(sv('line', { class: 'ref', x1: m.l, x2: W - m.r, y1: y(uni), y2: y(uni) }));
+  const cross = sv('line', { class: 'cross', y1: m.t, y2: m.t + ph, visibility: 'hidden' }); svg.append(cross);
+  const placed = [];
+  fams.forEach((f, fi) => {
+    const s = shares[fi]; if (!f.pooled.stats.n) return;
+    svg.append(sv('path', { class: 'ln', stroke: famColor(fi), d: s.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join('') }));
+    if (nb <= 12) s.forEach((v, i) => svg.append(sv('circle', { class: 'dot', cx: x(i), cy: y(v), r: 5, fill: famColor(fi) })));
+    if (f.control) return;
+    let pk = 0; s.forEach((v, i) => { if (v > s[pk]) pk = i; });      // label only the peak
+    let lx = Math.max(m.l + 16, Math.min(W - m.r - 16, x(pk))), ly = y(s[pk]) - 9;
+    if (placed.some(p => Math.abs(p[0] - lx) < 44 && Math.abs(p[1] - ly) < 14)) ly -= 14;
+    const dup = placed.some(p => p[2] === pk);        // both families peak on the same number: one label
+    placed.push([lx, ly, pk]);
+    svg.append(sv('circle', { class: 'dot', cx: x(pk), cy: y(s[pk]), r: 5, fill: famColor(fi) }),
+               dup ? '' : sv('text', { class: 'lb', x: lx, y: ly, 'text-anchor': 'middle' }, binLabel(pk)));
+  });
+  finishPlot(box, svg, {
+    index: px => Math.max(0, Math.min(nb - 1, Math.floor((px - m.l) / pw * nb))),
+    cross: i => { if (i == null) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible'); } },
+    tip: i => [el('span', null, 'picked ' + binLabel(i).replace('–', ' to ')),
+               ...fams.map((f, fi) => tipRow(famColor(fi), f.pooled.stats.n ? pct(shares[fi][i]) : 'no data', f.family)),
+               tipRow('var(--muted)', pct(uni), 'truly random')],
+  });
+}
+
+function renderEffort(view) {
+  const host = $('effort');
+  const cols = famColors(view), famColor = i => cols[i];
+  const llm = view.families.map((f, i) => [f, i]).filter(o => !o[0].control);   // effort does not apply to the control
+  if (host.childElementCount !== llm.length) {
+    host.textContent = '';
+    llm.forEach(() => { const p = el('div', 'panel'), b = el('div', 'plot'); attachHover(b); p.append(el('div', 'pt'), b); host.append(p); });
+  }
+  llm.forEach(([fam, fi], pi) => {
+    const panel = host.children[pi], box = panel.lastChild;
+    panel.firstChild.textContent = fam.family + ' family';
+    const efforts = []; fam.models.forEach(mo => mo.rows.forEach(r => { if (!efforts.includes(r.effort)) efforts.push(r.effort); }));
+    const W = Math.max(300, box.clientWidth), H = 360, m = { l: 46, r: 150, t: 14, b: 30 };
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const series = fam.models.map(mo => ({ label: mo.label, pts: efforts.map(e => { const r = mo.rows.find(q => q.effort === e); return r && r.stats.n ? r.stats.entropy : null; }) }));
+    const refs = []; fam.models.forEach(mo => mo.rows.forEach(r => { if (r.stats.n) refs.push(r.stats.entropy_ref); }));
+    const rv = refs.length ? refs.reduce((a, b) => a + b, 0) / refs.length : null;
+    // The axis zooms to the data (a line chart needs no zero baseline); both panels share one scale.
+    const all = []; llm.forEach(([f]) => f.models.forEach(mo => mo.rows.forEach(r => { if (r.stats.n) all.push(r.stats.entropy, r.stats.entropy_ref); })));
+    let y0 = 0, y1 = 1, step = 0.25;
+    if (all.length) {
+      const lo = Math.min(...all), hi = Math.max(...all);
+      step = Math.max(0.05, niceStep((hi - lo) / 4 || 0.05));
+      y0 = Math.max(0, Math.floor((lo - step * .3) / step) * step); y1 = Math.min(1, Math.ceil((hi + step * .1) / step) * step);
+      if (y1 - y0 < step * 2) y0 = Math.max(0, y1 - step * 2);
+    }
+    const x = j => m.l + 18 + (efforts.length > 1 ? j / (efforts.length - 1) : .5) * (pw - 36), y = v => m.t + (1 - (v - y0) / (y1 - y0)) * ph;
+    const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Spread of answers by reasoning effort, ' + fam.family + ' models' });
+    for (let v = y0; v <= y1 + 1e-9; v += step) {
+      svg.append(sv('line', { class: v - y0 > 1e-9 ? 'g' : 'ax', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
+                 sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, v.toFixed(2)));
+    }
+    efforts.forEach((e, j) => svg.append(sv('text', { x: x(j), y: H - 8, 'text-anchor': 'middle' }, e)));
+    if (rv != null) {
+      svg.append(sv('line', { class: 'ref', x1: m.l, x2: W - m.r, y1: y(rv), y2: y(rv) }),
+                 sv('text', { x: m.l + 4, y: y(rv) + (y(rv) - m.t < 16 ? 13 : -5) }, 'truly random'));
+    }
+    const cross = sv('line', { class: 'cross', y1: m.t, y2: m.t + ph, visibility: 'hidden' }); svg.append(cross);
+    const ends = [];
+    series.forEach(s => {
+      const pts = s.pts.map((v, j) => v == null ? null : [x(j), y(v)]).filter(Boolean);
+      if (!pts.length) return;
+      svg.append(sv('path', { class: 'ln', stroke: famColor(fi), d: pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('') }));
+      pts.forEach(p => svg.append(sv('circle', { class: 'dot', cx: p[0], cy: p[1], r: 5, fill: famColor(fi) })));
+      ends.push({ label: s.label, px: pts[pts.length - 1][0], py: pts[pts.length - 1][1] });
+    });
+    ends.sort((a, b) => a.py - b.py);                               // end labels: keep 14px apart, joined by a leader
+    ends.forEach((e, i) => { e.ly = i ? Math.max(e.py, ends[i - 1].ly + 14) : e.py; });
+    const over = ends.length ? ends[ends.length - 1].ly - (m.t + ph) : 0;
+    if (over > 0) for (let i = ends.length - 1; i >= 0; i--) { ends[i].ly = Math.min(ends[i].ly, m.t + ph - (ends.length - 1 - i) * 14); }
+    ends.forEach(e => {
+      const lx = W - m.r + 14;
+      svg.append(sv('line', { class: 'lead', x1: e.px + 7, y1: e.py, x2: lx - 4, y2: e.ly }),
+                 sv('text', { class: 'lb', x: lx, y: e.ly + 4 }, e.label));
+    });
+    finishPlot(box, svg, {
+      index: px => { let best = 0; efforts.forEach((_, j) => { if (Math.abs(x(j) - px) < Math.abs(x(best) - px)) best = j; }); return best; },
+      cross: j => { if (j == null) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(j)); cross.setAttribute('x2', x(j)); cross.setAttribute('visibility', 'visible'); } },
+      tip: j => [el('span', null, efforts[j] + ' effort'), ...series.map(s => tipRow(famColor(fi), s.pts[j] == null ? 'no data' : s.pts[j].toFixed(2), s.label))],
+    });
+  });
+}
+
+/* ---------- run status (rounds, like epochs) ---------- */
+function renderRun(view) {
+  const T = S.tests.find(t => t.k === range), H = T.history, last = H[H.length - 1];
+  $('eround').textContent = 'Round ' + T.round + ' of ' + T.rounds;
+  $('esub').textContent = { idle: 'not started', running: 'running', pausing: 'pausing', paused: 'paused', done: 'complete' }[T.status]
+    + (last ? ' \u00b7 ' + fmt(last.calls) + ' API calls \u00b7 ' + money(last.spent) + ' spent on this test' : '');
+  const cols = famColors(view), colorOf = {}; view.families.forEach((f, i) => colorOf[f.family] = cols[i]);
+  const fams = view.families.filter(f => !f.control);
+
+  const mb = $('mbars'); mb.textContent = '';
+  fams.forEach(f => f.models.forEach(mo => {
+    const done = mo.rows.reduce((a, r) => a + r.done, 0), target = mo.rows.reduce((a, r) => a + r.target, 0);
+    const skipped = mo.rows.every(r => r.disabled);
+    const row = el('div', 'mbar'), meter = el('div', 'meter'), fill = el('i');
+    fill.style.width = (target ? done / target * 100 : 0) + '%'; fill.style.background = colorOf[f.family]; meter.append(fill);
+    row.append(el('span', null, mo.label), meter, el('span', null, skipped ? 'skipped' : fmt(done) + ' / ' + fmt(target)));
+    mb.append(row);
+  }));
+
+  const Q = T.quality, qx = $('qcx'); qx.textContent = '';
+  $('qc').textContent = !Q.total ? 'Quality check: every reply must be a number and nothing else. No replies yet.'
+    : Q.clean === Q.total ? '\u2713 Quality check passed: all ' + fmt(Q.total) + ' replies were a number and nothing else.'
+    : '\u26a0 Quality check: ' + fmt(Q.clean) + ' of ' + fmt(Q.total) + ' replies were a number and nothing else. ' + fmt(Q.extra)
+      + ' had extra text around the number (still counted) and ' + fmt(Q.unusable) + ' had no usable number (left out). Latest:';
+  Q.examples.forEach(x => qx.append(el('li', null, x.label + ' \u00b7 ' + x.effort + ': \u201c' + x.text + '\u201d (' + (x.kind === 'extra_text' ? 'extra text' : String(x.kind).replace(/_/g, ' ')) + ')')));
+
+  const log = $('elog'); log.textContent = '';
+  const hr = el('tr'); ['Round', 'Calls', ...fams.map(f => f.family + ' spread'), 'Same fam.', 'Cross fam.', 'Spent'].forEach(h => hr.append(el('th', null, h)));
+  log.append(hr);
+  const f2 = v => v == null ? '\u2013' : v.toFixed(3);
+  if (!H.length) { const tr = el('tr'), td = el('td', null, 'The first line appears when round 1 completes.'); td.colSpan = 5 + fams.length; td.style.textAlign = 'left'; td.style.fontWeight = '400'; tr.append(td); log.append(tr); }
+  H.slice(-8).forEach(h => {
+    const tr = el('tr');
+    [String(h.round), fmt(h.calls), ...fams.map(f => f2(h.spread[f.family])), f2(h.within), f2(h.between), money(h.spent)].forEach(v => tr.append(el('td', null, v)));
+    log.append(tr);
+  });
+
+  const keys = $('convkeys'); keys.textContent = '';
+  fams.forEach(f => { const s = el('span'), k = el('i'); k.style.background = colorOf[f.family]; s.append(k, f.family + ' family'); keys.append(s); });
+  const box = $('conv'); if (!box._on) { attachHover(box); box._on = true; }
+  const W = Math.max(300, box.clientWidth), HH = 320, m = { l: 46, r: 50, t: 12, b: 30 }, pw = W - m.l - m.r, ph = HH - m.t - m.b;
+  const y0 = 0, y1 = 1, step = 0.25;
+  const x = r => m.l + r / T.rounds * pw, y = v => m.t + (1 - (v - y0) / (y1 - y0)) * ph;
+  const svg = sv('svg', { width: W, height: HH, role: 'img', 'aria-label': 'Spread of answers by round, one line per family' });
+  for (let v = y0; v <= y1 + 1e-9; v += step) {
+    svg.append(sv('line', { class: v - y0 > 1e-9 ? 'g' : 'ax', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
+               sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, v.toFixed(2)));
+  }
+  [0, .25, .5, .75, 1].forEach(q => svg.append(sv('text', { x: x(q * T.rounds), y: HH - 8, 'text-anchor': 'middle' }, String(Math.round(q * T.rounds)))));
+  svg.append(sv('text', { x: W - m.r, y: y(1) + 15, 'text-anchor': 'end' }, 'truly random'));
+  const cross = sv('line', { class: 'cross', y1: m.t, y2: m.t + ph, visibility: 'hidden' }); svg.append(cross);
+  fams.forEach(f => {
+    const pts = H.filter(h => h.spread[f.family] != null).map(h => [x(h.round), y(h.spread[f.family]), h.spread[f.family]]);
+    if (!pts.length) return;
+    svg.append(sv('path', { class: 'ln', stroke: colorOf[f.family], d: pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('') }));
+    const e = pts[pts.length - 1];                                   // label only the latest value
+    svg.append(sv('circle', { class: 'dot', cx: e[0], cy: e[1], r: 5, fill: colorOf[f.family] }),
+               sv('text', { class: 'lb', x: e[0] + 8, y: e[1] + 4 }, e[2].toFixed(2)));
+  });
+  finishPlot(box, svg, {
+    index: px => { let b = 0; H.forEach((h, i) => { if (Math.abs(x(h.round) - px) < Math.abs(x(H[b].round) - px)) b = i; }); return H.length ? b : null; },
+    cross: i => { if (i == null || !H[i]) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(H[i].round)); cross.setAttribute('x2', x(H[i].round)); cross.setAttribute('visibility', 'visible'); } },
+    tip: i => !H[i] ? [el('span', null, 'no rounds yet')] : [el('span', null, 'round ' + H[i].round),
+      ...fams.map(f => tipRow(colorOf[f.family], f2(H[i].spread[f.family]), f.family + ' spread')),
+      tipRow('var(--muted)', f2(H[i].within), 'same-family distance'), tipRow('var(--muted)', f2(H[i].between), 'cross-family distance')],
+  });
+}
+
+/* ---------- response time ---------- */
+function renderTiming(view) {
+  const box = $('timing'), fams = view.families.filter(f => !f.control);
+  const efforts = []; fams.forEach(f => f.models.forEach(mo => mo.rows.forEach(r => { if (!efforts.includes(r.effort)) efforts.push(r.effort); })));
+  const ecol = e => 'var(--e' + (Math.min(efforts.indexOf(e), 2) + 1) + ')';
+  const keys = $('timekeys'); keys.textContent = '';
+  efforts.forEach(e => { const s = el('span'), k = el('i', 'sq'); k.style.background = ecol(e); s.append(k, e + ' effort'); keys.append(s); });
+  const W = Math.max(320, box.clientWidth), m = { l: 176, r: 84, t: 4, b: 32 }, bh = 16, gap = 2, mg = 18, fh = 30;
+  let max = 0, yy = m.t; const lay = [];
+  fams.forEach(f => {
+    lay.push({ head: f.family, y: yy }); yy += fh;
+    f.models.forEach(mo => {
+      lay.push({ model: mo, y: yy });
+      mo.rows.forEach(r => { if (r.time) max = Math.max(max, r.time.p90); });
+      yy += mo.rows.length * (bh + gap) - gap + mg;
+    });
+  });
+  const H = yy - mg + 14 + m.b, bottom = H - m.b;
+  const step = niceStep((max || 1) / 6), xmax = Math.ceil((max || 1) / step - 1e-9) * step;
+  const x = v => m.l + v / xmax * (W - m.l - m.r);
+  const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Median response time in seconds by model and reasoning effort' });
+  for (let v = 0; v <= xmax + 1e-9; v += step) {
+    svg.append(sv('line', { class: v ? 'g' : 'ax', x1: x(v), x2: x(v), y1: m.t, y2: bottom }),
+               sv('text', { x: x(v), y: H - 10, 'text-anchor': 'middle' }, (step < 1 ? v.toFixed(1) : v.toFixed(0)) + ' s'));
+  }
+  lay.forEach(L => {
+    if (L.head) { svg.append(sv('text', { class: 'fh', x: 0, y: L.y + 18 }, L.head)); return; }
+    const mo = L.model, n = mo.rows.length;
+    svg.append(sv('text', { class: 'lb', x: 0, y: L.y + (n * (bh + gap) - gap) / 2 + 5 }, mo.label));
+    mo.rows.forEach((r, i) => {
+      if (!r.time) return;
+      const y0 = L.y + i * (bh + gap), x0 = x(0), w = Math.max(2, x(r.time.median) - x0), rr = Math.min(4, w / 2);
+      // square at the baseline, rounded at the data end
+      svg.append(sv('path', { fill: ecol(r.effort), d: 'M' + x0 + ' ' + y0 + 'h' + (w - rr) + 'a' + rr + ' ' + rr + ' 0 0 1 ' + rr + ' ' + rr + 'v' + (bh - 2 * rr) + 'a' + rr + ' ' + rr + ' 0 0 1 ' + (-rr) + ' ' + rr + 'H' + x0 + 'Z' }));
+      const xp = x(r.time.p90);
+      if (xp > x0 + w + 2) svg.append(sv('line', { class: 'ref', x1: x0 + w, x2: xp, y1: y0 + bh / 2, y2: y0 + bh / 2 }),
+                                      sv('line', { class: 'ref', x1: xp, x2: xp, y1: y0 + 4, y2: y0 + bh - 4 }));
+      svg.append(sv('text', { class: 'lb', x: Math.max(xp, x0 + w) + 8, y: y0 + bh / 2 + 5 }, r.time.median.toFixed(2) + ' s'));
+      const hit = sv('rect', { x: x0, y: y0 - 1, width: W - x0, height: bh + 2, fill: 'transparent' });
+      hit.addEventListener('pointermove', e => placeTip(e, [el('span', null, mo.label + ' \u00b7 ' + r.effort + ' effort'),
+        el('strong', null, r.time.median.toFixed(2) + ' s typical'), el('span', null, '90% of calls within ' + r.time.p90.toFixed(2) + ' s'),
+        el('span', null, 'reasoning tokens per call: ' + r.rtok.toFixed(1))]));
+      hit.addEventListener('pointerleave', () => { $('tip').style.display = 'none'; });
+      svg.append(hit);
+    });
+  });
+  box.textContent = ''; box.append(svg);
+}
+
+/* ---------- summary card ---------- */
+let shareSig = '', sh = null;
+function renderShare(view) {
+  const box = $('share'), T = S.tests.find(t => t.k === range), nb = Math.ceil(view.k / view.bin_size);
+  const sigNow = view.k + '|' + view.families.map(f => f.family + ':' + f.models.map(m => m.id).join()).join('|');
+  if (sigNow !== shareSig) {
+    shareSig = sigNow; box.textContent = ''; sh = { rows: [] };
+    sh.title = el('div', 'sh-t'); sh.sub = el('div', 'sh-s'); sh.num = el('div', 'sh-num'); sh.ht = el('div', 'sh-ht');
+    const hero = el('div', 'sh-hero'); hero.append(sh.num, sh.ht);
+    const rows = el('div', 'sh-rows'), ax = el('div', 'sh-row g'), axis = el('div', 'axisl');
+    const ticks = view.k <= 12 ? Array.from({ length: view.k }, (_, i) => i + 1) : [1, view.k / 4, view.k / 2, view.k * 3 / 4, view.k].map(Math.round);
+    ticks.forEach((v, i) => {
+      const edge = view.k > 12 && (i === 0 || i === ticks.length - 1);
+      const t = el('span', edge ? (i ? 'r' : 'l') : '', String(v));
+      t.style.left = (edge ? (i ? 100 : 0) : (Math.floor((v - 1) / view.bin_size) + .5) / nb * 100) + '%'; axis.append(t);
+    });
+    ax.append(el('span', null, 'number picked'), axis, el('span', 'num', 'top pick')); rows.append(ax);
+    const add = (label, get) => {
+      const r = el('div', 'sh-row'), cv = el('canvas'), top = el('span', 'num');
+      cv.addEventListener('pointermove', stripHover); cv.addEventListener('pointerleave', stripLeave);
+      r.append(el('span', null, label), cv, top); rows.append(r); sh.rows.push({ cv, top, get });
+    };
+    view.families.forEach((f, fi) => {
+      if (f.control) return;
+      const g = el('div', 'sh-row g'); g.append(el('span', null, f.family)); rows.append(g);
+      f.models.forEach((m, mi) => add(m.label, v => v.families[fi].models[mi].pooled));
+    });
+    view.families.forEach((f, fi) => {
+      if (!f.control) return;
+      const g = el('div', 'sh-row g'); g.append(el('span', null, 'for comparison')); rows.append(g);
+      add('Python random', v => v.families[fi].pooled);
+    });
+    sh.foot = el('span');
+    const f = el('div', 'sh-f'); f.append(sh.foot, el('span', null, new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })));
+    box.append(el('div', 'sh-k', 'Random number benchmark'), sh.title, sh.sub, hero, rows, f);
+  }
+  const L = view.llm.stats, models = view.families.filter(f => !f.control).reduce((a, f) => a + f.models.length, 0);
+  sh.title.textContent = '\u201c' + S.prompts.main.replace('{max}', view.k) + '\u201d';
+  const effs = []; view.families.forEach(f => { if (!f.control) f.models.forEach(m => m.rows.forEach(r => { if (!effs.includes(r.effort)) effs.push(r.effort); })); });
+  sh.sub.textContent = !L.n ? 'No answers yet' : fmt(L.n) + ' answers from ' + models + ' AI models'
+    + (T.status === 'done' ? ': ' + S.samples.main + ' per model at each reasoning effort (' + effs.join(', ') + ')' : ' so far');
+  sh.num.textContent = L.n ? L.mode : '?';
+  sh.ht.textContent = '';
+  if (L.n) sh.ht.append(el('b', null, pct(L.mode_share) + ' of all answers were ' + L.mode + '.'), el('br'),
+                        'Truly random picking would give ' + pct(1 / view.k) + '.');
+  sh.rows.forEach(r => {
+    const d = r.get(view), s = d.stats;
+    r.cv._d = { bins: d.bins, total: s.n, size: view.bin_size, k: view.k };
+    drawStrip(r.cv);
+    r.top.textContent = s.n ? s.mode + ' \u00b7 ' + pct(s.mode_share) : '';
+  });
+  sh.foot.textContent = 'Each strip is all of a model\u2019s answers, every effort together. A fresh conversation every time. Stronger colour = picked more often.';
+}
+
+/* ---------- family comparison ---------- */
+function tile(label, value, sub, words) {
+  const t = el('div', 'tile');
+  t.append(el('div', 'tl', label), el('div', 'tv' + (words ? ' words' : ''), value), el('div', 'ts', sub));
+  return t;
+}
+function renderMatrix(view) {
+  const m = view.matrix, D = m[metric], n = m.labels.length, test = m.test[metric];
+  $('mxsub').textContent = (metric === 'jsd'
+    ? 'Distance between two models’ answer distributions, all efforts pooled (Jensen–Shannon divergence: 0 = identical, 1 = no overlap' + (view.bin_size > 1 ? '; answers grouped in bins of ' + view.bin_size : '') + ').'
+    : 'Distance between two models’ answer distributions, all efforts pooled (earth mover’s distance scaled to 0–1, so picking 6 instead of 7 still counts as close).')
+    + (darkMQ.matches ? ' Brighter' : ' Darker') + ' cells are more alike.';
+  const tiles = $('tiles'); tiles.textContent = '';
+  if (test) {
+    const dp = metric === 'jsd' ? 2 : 3;
+    const closer = test.within < test.between;
+    tiles.append(
+      tile('Same family', test.within.toFixed(dp), 'average distance'),
+      tile('Different families', test.between.toFixed(dp), 'average distance'),
+      tile('So far', test.p < 0.05 && closer ? 'Families cluster' : 'No clear family effect',
+           'p = ' + test.p.toFixed(3) + ', exact permutation test, ' + test.splits + ' label splits', true));
+  } else {
+    tiles.append(tile('So far', 'Not enough answers yet', 'needs at least two models per family', true));
+  }
+  if (m.noise && m.noise[metric] != null)
+    tiles.append(tile('Random vs random', m.noise[metric].toFixed(metric === 'jsd' ? 2 : 3), 'noise floor: two real random generators'));
+  let max = 0; D.forEach(r => r.forEach(v => { if (v != null && v > max) max = v; }));
+  const tbl = el('table', 'mx'), thead = el('thead'), tb = el('tbody');
+  const fr = el('tr'), lr = el('tr'); fr.append(el('th')); lr.append(el('th'));
+  let i = 0;
+  while (i < n) { let j = i; while (j < n && m.families[j] === m.families[i]) j++;
+    const th = el('th', 'famh' + (i ? ' gl' : ''), m.families[i]); th.colSpan = j - i; fr.append(th); i = j; }
+  m.labels.forEach((l, c) => lr.append(el('th', c && m.families[c] !== m.families[c - 1] ? 'gl' : '', l)));
+  thead.append(fr, lr);
+  for (let a = 0; a < n; a++) {
+    const tr = el('tr', a && m.families[a] !== m.families[a - 1] ? 'gt' : '');
+    tr.append(el('th', null, m.labels[a]));
+    for (let b = 0; b < n; b++) {
+      const v = D[a][b], gl = b && m.families[b] !== m.families[b - 1] ? ' gl' : '';
+      let td;
+      if (a === b) td = el('td', 'diag' + gl, '·');
+      else if (v == null) td = el('td', 'none' + gl, '');
+      else {
+        td = el('td', gl.trim(), v.toFixed(metric === 'jsd' ? 2 : 3));
+        const c = rampRGB(max ? 1 - v / max : 1);
+        td.style.background = rgb(c); td.style.color = inkOn(c);
+        td.title = m.labels[a] + ' vs ' + m.labels[b] + ': distance ' + v.toFixed(3);
+      }
+      tr.append(td);
+    }
+    tb.append(tr);
+  }
+  tbl.append(thead, tb);
+  const box = $('matrix'); box.textContent = ''; box.append(tbl);
+}
+
+/* ---------- top panel ---------- */
+function eta(s) {
+  if (s == null) return '';
+  if (s < 90) return 'about a minute left';
+  if (s < 5400) return 'about ' + Math.round(s / 60) + ' min left';
+  return 'about ' + (s / 3600).toFixed(1) + ' h left';
+}
+const tname = k => '1–' + k;
+function renderTop() {
+  $('demo').hidden = !S.demo && !STATIC;
+  if (STATIC) $('demo').textContent = 'Results snapshot, ' + S.snapshot_date;
+  const T = S.tests.find(t => t.k === range), busy = S.active != null && S.active !== range;
+  const b = $('run'), st = T.status, name = tname(range);
+  b.textContent = busy ? 'Run ' + name + ' test'
+    : { idle: 'Run ' + name + ' test', running: 'Pause', pausing: 'Pausing…', paused: 'Resume ' + name + ' test', done: name + ' test complete' }[st];
+  b.disabled = busy || st === 'pausing' || st === 'done';
+  $('pbar').style.width = (T.target ? T.done / T.target * 100 : 0) + '%';
+  const parts = [fmt(T.done) + ' of ' + fmt(T.target) + ' API calls'];
+  if (st === 'running') { parts.push(fmt(T.per_min) + ' per min'); const e = eta(T.eta_s); if (e) parts.push(e); }
+  else parts.push({ idle: 'not started', pausing: 'finishing calls in flight', paused: 'paused, progress saved', done: 'finished' }[st]);
+  if (busy) parts.push('the ' + tname(S.active) + ' test is running: pause it or wait before starting this one');
+  $('ptext').textContent = parts.join(' · ');
+  let msg = T.message || '';
+  if (!msg && st === 'done') {
+    const next = S.tests.find(t => t.status !== 'done');
+    msg = next ? name + ' test complete. Select the ' + tname(next.k) + ' test and press Run.' : 'All tests are complete.';
+  }
+  $('message').textContent = STATIC ? '' : msg;
+  [...$('ranges').children].forEach((btn, i) => {
+    const t = S.tests[i];
+    btn.textContent = tname(t.k) + (t.status === 'done' ? ' ✓' : t.done ? ' · ' + Math.floor(t.done / t.target * 100) + '%' : '');
+  });
+  const box = $('providers'); box.textContent = '';
+  for (const p of S.providers) {
+    const bt = p.by_test[String(range)];
+    const d = el('div', 'prov'), head = el('div', 'pname');
+    head.append(el('span', null, p.name), el('span', null, S.active === range ? p.state : ''));
+    const val = el('div', 'pval', money(p.spent) + ' '); val.append(el('small', null, 'of ' + money(p.cap) + ' budget, all tests'));
+    const meter = el('div', 'meter'), fill = el('i'); fill.style.width = Math.min(100, p.cap ? p.spent / p.cap * 100 : 0) + '%'; meter.append(fill);
+    const sub = ['this test: ' + fmt(bt.done) + ' / ' + fmt(bt.target) + ' calls',
+                 money(bt.spent) + ' spent' + (bt.projected != null ? ', ' + money(bt.projected) + ' projected' : '')];
+    if (!STATIC) sub.push(S.demo ? 'simulated' : p.key ? '✓ API key found' : '○ no API key in .env yet');
+    d.append(head, val, meter, el('div', 'psub', sub.join(' · ')));
+    box.append(d);
+  }
+  const feed = $('feed'); feed.textContent = '';
+  if (!S.recent.length) feed.append(el('li', null, 'Nothing yet. Press Run.'));
+  for (const r of S.recent) {
+    const li = el('li');
+    li.append(el('span', 'ft', new Date(r.t * 1000).toLocaleTimeString('en-GB')),
+              el('span', 'fl', r.label + ' · ' + r.effort + ' · 1–' + r.k),
+              el('span', 'fv', r.valid ? r.text : '“' + r.text + '” (not valid)'));
+    feed.append(li);
+  }
+  const iss = $('issues'); iss.textContent = ''; S.issues.forEach(t => iss.append(el('li', null, t)));
+  const pr = $('prompts'); pr.textContent = '';
+  const line = (lead, id) => { const d = el('div', null, lead + ' '); d.append(el('q', null, S.prompts[id].replace('{max}', range))); return d; };
+  pr.append(line('Prompt sent to every model, ' + S.samples.main + ' times per effort level:', 'main'));
+  Object.keys(S.prompts).filter(id => id !== 'main').forEach(id => pr.append(line('Rewording check, ' + S.samples.para + ' times at ' + S.samples.para_effort + ' effort:', id)));
+  pr.append(el('div', null, 'Nothing else is sent: no system prompt and no earlier messages. Replies are free text, and each one is checked to be a number and nothing else.'));
+  if (!STATIC) { $('datafile').textContent = T.file; $('allfile').textContent = S.data_file; }
+}
+
+function renderCharts(force) {
+  const key = range + metric + darkMQ.matches;
+  if (!force && S.version === lastVersion && key === lastKey) return;
+  lastVersion = S.version; lastKey = key;
+  emptyColor = getComputedStyle(document.documentElement).getPropertyValue('--empty').trim() || emptyColor;
+  const hex = emptyColor.replace('#', '');
+  if (hex.length === 6) emptyRGB = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
+  $('lgramp').style.background = 'linear-gradient(90deg,' + Array.from({ length: 21 }, (_, i) => heat(Math.pow(Math.max(i, 0.4) / 20, 2))).join(',') + ')';
+  const view = S.views[String(range)];
+  renderRun(view); renderTable(view); renderWording(view); renderFamLines(view); renderEffort(view); renderTiming(view); renderMatrix(view); renderShare(view);
+}
+
+function renderRanges() {
+  const box = $('ranges'); if (box.childElementCount === S.ranges.length) return;
+  box.textContent = '';
+  if (range == null) {   // ?test=10 opens that test; otherwise the first test still to run
+    const want = +URLQ.get('test');
+    const first = STATIC ? [...S.tests].reverse().find(t => t.done) : S.tests.find(t => t.status !== 'done');   // snapshot: newest test with data
+    range = S.ranges.includes(want) ? want : (first || S.tests[0]).k;
+  }
+  for (const k of S.ranges) {
+    const b = el('button', null, '1–' + k); b.setAttribute('aria-pressed', k === range);
+    b.onclick = () => { range = k; [...box.children].forEach(c => c.setAttribute('aria-pressed', c === b)); renderTop(); renderCharts(); };
+    box.append(b);
+  }
+}
+
+async function poll() {
+  if (STATIC) {
+    S = window.SNAPSHOT; renderRanges(); renderTop(); renderCharts();
+    $('liveh').textContent = 'The prompts';
+    const f = document.querySelector('footer'), a = el('a', null, S.repo.replace('https://', '')); a.href = S.repo;
+    f.textContent = 'Snapshot of the LLM Random Number Benchmark. Code and every recorded answer: '; f.append(a);
+    return;
+  }
+  try {
+    const next = await (await fetch('/api/state', { cache: 'no-store' })).json();
+    if (S && S.active != null && next.active == null) lastVersion = -1;   // a test just ended: redraw
+    S = next;
+    renderRanges(); renderTop(); renderCharts();
+    if (document.body.classList.contains('only')) document.documentElement.dataset.h = document.querySelector('section.onlyshow').offsetHeight;
+  } catch (e) {
+    $('ptext').textContent = 'Lost contact with the benchmark. Reopen the .command file; progress is saved.';
+    $('run').disabled = true;
+  }
+}
+$('run').onclick = async () => {
+  const live = S && S.active === range && S.tests.find(t => t.k === range).status === 'running';
+  $('run').disabled = true;
+  await fetch(live ? '/api/pause' : '/api/run?range=' + range, { method: 'POST', headers: { 'X-Bench': '1' } });
+  poll();
+};
+[...$('metrics').children].forEach(b => b.onclick = () => {
+  metric = b.dataset.m; [...$('metrics').children].forEach(c => c.setAttribute('aria-pressed', c === b)); if (S) renderCharts();
+});
+window.addEventListener('resize', () => S && renderCharts(true));
+darkMQ.addEventListener('change', () => S && renderCharts(true));
+poll(); if (!STATIC) setInterval(poll, 1000);
+</script>
+</body>
+</html>
