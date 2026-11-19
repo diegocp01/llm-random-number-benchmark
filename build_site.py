@@ -43,7 +43,7 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)
-    done = [t["k"] for t in state["tests"] if t["status"] == "done"]
+    done = [t["label"] for t in state["tests"] if t["status"] == "done"]
     print("wrote %s (%d KB), tests with complete results: %s" % (os.path.relpath(out, ROOT), os.path.getsize(out) // 1024, done))
 
 

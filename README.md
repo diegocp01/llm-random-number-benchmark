@@ -24,6 +24,7 @@ with each other and with a real random number generator.
 | 1–10 | "Pick a random number between 1 and 10. Reply with only the number." | **Complete** (18 Nov 2026) | 5,600 | $1.31 |
 | 1–100 | same, 1 to 100 | **Complete** (18 Nov 2026) | 5,600 | $1.21 |
 | 1–1000 | same, 1 to 1000 | Not run yet | | |
+| 1–10 (Decisions API) | "Pick a random number between 1 and 10." asked of two decision models, with the ten numbers as options | Not run yet | | |
 
 Results for the two finished tests are below. This README is updated as each test finishes.
 
@@ -138,6 +139,19 @@ Shares are over the 600 main-prompt answers per model. The run was interrupted o
 | Control | Python `random` (Mersenne Twister, seeded) and `secrets` (OS entropy), 3 runs × 200 draws, scored by the same code |
 | Order | all model × effort cells advance together, one answer at a time, so no model is sampled at a different time of day |
 
+**Decision-API test.** A fourth test asks the same 1–10 question of *decision models*:
+OpenAI's Decisions API (`POST /v1/decisions`, model `gpt-6-luna`) and TypeSafe's Jev
+(`POST /v1/systemone`, model `jev-1.14.0`). A decision model does not write a reply. It
+is given a question and a fixed list of options and returns one option, a probability
+for every option and a confidence. The question is sent as one choice question,
+"Pick a random number between 1 and 10.", with the options `1` to `10`, no option
+descriptions and an empty input. There is no reasoning effort and no sampling setting,
+so the condition that varies is the order the options are listed in, which both
+vendors document as able to move the answer: ascending, descending, and shuffled anew
+on every call. Each model answers 200 times per order, plus 2 rewordings × 50 calls in
+ascending order: 1,400 calls. Every record keeps the options in the order sent, the
+pick and the full set of probabilities.
+
 **Quality check.** Every reply must be a number and nothing else. A reply with one
 in-range number plus other characters is counted and flagged; anything else is left
 out and flagged. In the 1–10 test all 5,600 replies passed: no flags.
@@ -188,7 +202,9 @@ Fields of a record in `data/test_1-*.json`:
    ```
    OPENAI_API_KEY=...
    ANTHROPIC_API_KEY=...
+   TYPESAFE_API_KEY=...
    ```
+   The TypeSafe key is only needed for the decision-API test.
 2. On macOS, double-click `Start Benchmark.command`. Elsewhere:
    ```bash
    python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python server.py

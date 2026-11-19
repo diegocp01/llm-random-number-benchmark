@@ -13,9 +13,12 @@ instead checked afterwards to be a number and nothing else (parse_answer).
 Reasoning: neither API returns the raw chain of thought. What is saved is the
 reasoning summary each API provides, plus the reasoning token count.
 """
+import json
 import random
 import re
 import time
+import urllib.error
+import urllib.request
 
 class Fatal(Exception):
     pass
@@ -173,6 +176,158 @@ def call_anthropic(client, model, effort, prompt, max_out):
         "served_model": r.model,
         "stop": r.stop_reason or "",
     }
+
+
+# ---------------------------------------------------------------- Decision APIs
+#
+# A decision model is not asked to write a reply. It is given the question and a
+# fixed list of options, and returns one option plus a probability for every
+# option. There is no reasoning effort and no sampling setting. What can be
+# varied is the order the options are listed in, which both vendors say can
+# move the answer, so the order is the condition these tests vary.
+
+def decision_options(k, order, rng):
+    """The numbers 1..k as option names, in the order this call lists them."""
+    options = [str(n) for n in range(1, k + 1)]
+    if order == "descending":
+        options.reverse()
+    elif order == "shuffled":
+        rng.shuffle(options)
+    return options
+
+
+def _decision_result(prompt, state, options, choice, probs, confidence, usage, served, stop):
+    """Common shape for both decision APIs. `probs` maps option name -> probability."""
+    missing = [o for o in options if o not in probs]
+    return {
+        "text": "" if choice is None else str(choice),
+        "input": json.dumps({"input": state, "question": prompt, "options": options}, ensure_ascii=False),
+        "reasoning": None,
+        "reasoning_note": "decision model: returns probabilities, no reasoning text",
+        "in_tok": int((usage or {}).get("input_tokens") or 0),
+        "out_tok": int((usage or {}).get("output_tokens") or 0),
+        "reason_tok": None,
+        "usage": usage,
+        "served_model": served,
+        "stop": stop,
+        "options": options,
+        "probs": {o: float(probs.get(o, 0.0)) for o in options},
+        "confidence": confidence,
+        # an option left out of the returned distribution is counted as 0 and the call is flagged
+        "flag": "missing_probabilities" if missing and choice is not None else None,
+    }
+
+
+def call_openai_decision(client, model, prompt, options, state=""):
+    """POST /v1/decisions with one choice question. Choice values must be strings."""
+    import openai
+    try:
+        r = client.decisions.create(
+            model=model,
+            input=state,
+            questions=[{"type": "choice", "name": "number", "instructions": prompt,
+                        "choices": [{"value": o} for o in options]}],
+        )
+    except openai.AuthenticationError as e:
+        raise Fatal("API key rejected: " + _short(e))
+    except openai.PermissionDeniedError as e:
+        raise CellError("model", _short(e))
+    except openai.NotFoundError as e:
+        raise CellError("model", _short(e))
+    except openai.RateLimitError as e:
+        if "insufficient_quota" in str(e):
+            raise Fatal("out of credit: " + _short(e))
+        raise Transient(_short(e), _retry_after(e))
+    except openai.BadRequestError as e:
+        raise CellError("model", _short(e))
+    except openai.APIStatusError as e:
+        if e.status_code >= 500 or e.status_code in (408, 409):
+            raise Transient(_short(e), _retry_after(e))
+        raise CellError("model", _short(e))
+    except openai.APIConnectionError as e:
+        raise Transient("network: " + _short(e))
+
+    usage = _usage_dict(r.usage)
+    answer = r.answers[0] if r.answers else None
+    if answer is None or getattr(answer, "type", "") != "choice":
+        return _decision_result(prompt, state, options, None, {}, None, usage, r.model, "refusal")
+    probs = {str(p.value): p.probability for p in (answer.probabilities or [])}
+    return _decision_result(prompt, state, options, answer.choice, probs, answer.confidence, usage, r.model, "completed")
+
+
+JEV_URL = "https://api.typesafe.ai/v1/systemone"
+
+
+def make_jev(api_key):
+    return {"key": api_key}
+
+
+def call_jev(client, model, prompt, options, state=""):
+    """POST /v1/systemone with one Choice question (plain HTTPS, no SDK needed).
+
+    The options go in `criteria` as a map of option name -> description; the
+    descriptions are left empty (null) because the option names are the numbers."""
+    body = json.dumps({
+        "model": model,
+        "state": state,
+        "questions": {"number": {"type": "choice", "instructions": prompt, "criteria": {o: None for o in options}}},
+    }).encode("utf-8")
+    req = urllib.request.Request(JEV_URL, data=body, method="POST", headers={
+        "Authorization": "Bearer " + client["key"], "Content-Type": "application/json",
+        "User-Agent": "llm-random-number-benchmark",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")
+        except Exception:
+            detail = ""
+        msg = _short("HTTP %d %s" % (e.code, detail))
+        if e.code in (401, 402):
+            raise Fatal(("API key rejected: " if e.code == 401 else "out of credit: ") + msg)
+        if e.code in (408, 409, 429, 529) or e.code >= 500:
+            try:
+                wait = float(e.headers.get("retry-after"))
+            except (TypeError, ValueError):
+                wait = None
+            raise Transient(msg, wait)
+        raise CellError("model", msg)      # 400, 403, 404, 422: the request itself is not accepted
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise Transient("network: " + _short(e))
+    except ValueError as e:
+        raise Transient("unreadable reply: " + _short(e))
+
+    answer = (data.get("answers") or {}).get("number") or {}
+    usage = data.get("usage")
+    if answer.get("type") != "choice" or answer.get("choice") is None:
+        return _decision_result(prompt, state, options, None, {}, None, usage, data.get("model", model), "refusal")
+    probs = {str(name): p for name, p in (answer.get("probabilities") or {}).items()}
+    return _decision_result(prompt, state, options, answer["choice"], probs, answer.get("confidence"),
+                            usage, data.get("model", model), "completed")
+
+
+def call_demo_decision(family, model, order, k, rng=random):
+    """Invented decision answers so the UI can be tried without API keys. Not model data."""
+    time.sleep(rng.uniform(0.02, 0.08))
+    options = decision_options(k, order, rng)
+    favourite = 7 if k >= 7 else k
+    weight = {}
+    for pos, o in enumerate(options):
+        n = int(o)
+        w = 1.0 + (9.0 if n == favourite else 2.0 if abs(n - favourite) == 3 else 0.0)
+        w *= 1.0 + (1.5 if pos == 0 else 0.0)            # a lean toward the first option listed
+        weight[o] = w * rng.uniform(0.85, 1.15)
+    total = sum(weight.values())
+    probs = {o: w / total for o, w in weight.items()}
+    if family == "TypeSafe":                              # one of the two always picks its top option
+        choice = max(probs, key=probs.get)
+    else:
+        choice = rng.choices(list(probs), weights=list(probs.values()))[0]
+    top = sorted(probs.values(), reverse=True)
+    usage = {"input_tokens": 60, "output_tokens": 0}
+    return _decision_result("(simulated)", "", options, choice, probs, round(top[0] - top[1], 3), usage, model, "demo")
 
 
 # ---------------------------------------------------------------- Demo (simulated)

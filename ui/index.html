@@ -144,7 +144,7 @@
   /* distribution table */
   .scroll { overflow-x: auto; }
   #table, #wtable { min-width: 940px; }
-  .row { display: grid; grid-template-columns: 176px 70px minmax(320px, 1fr) 86px 100px 124px 230px;
+  .row { display: grid; grid-template-columns: 176px 84px minmax(320px, 1fr) 86px 100px 124px 230px;
          column-gap: 16px; align-items: center; min-height: 34px; }
   .row.head { color: var(--muted); font-size: 12px; align-items: end; padding-bottom: 6px;
               border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
@@ -227,7 +227,7 @@
 
   <section class="card">
     <h2>Run status</h2>
-    <p class="sub">Every model is asked the same question 200 times at each effort level. A round is finished when every model has answered one more time, so "round 11" means everyone has answered at least 11 times. Round 200 is the end of the test.</p>
+    <p class="sub" id="runsub"></p>
     <div class="epoch"><div class="ebig" id="eround"></div><div class="esub" id="esub"></div></div>
     <div class="mbars" id="mbars"></div>
     <div class="qc" id="qc" role="status"></div><ul class="qcx" id="qcx"></ul>
@@ -245,12 +245,18 @@
 
   <section class="card">
     <h2>What each model picks</h2>
-    <p class="sub">Each strip is one model at one reasoning effort. A stronger colour means that number was picked more often. A truly random picker looks like the flat top row.</p>
+    <p class="sub" id="tablesub"></p>
     <div class="legend">
       <div>Share of answers<div class="lg-ramp"><i id="lgramp"></i><span style="left:10%">1%</span><span style="left:22.4%">5%</span><span style="left:50%">25%</span><span style="left:94%">100%</span></div></div>
       <div class="lg-key"><span class="lg-tick"></span>Spread a truly random picker would score with the same number of answers</div>
     </div>
     <div class="scroll"><div id="table"></div></div>
+  </section>
+
+  <section class="card" id="probcard" style="display:none">
+    <h2>The probabilities each model reports</h2>
+    <p class="sub">A decision model does not only pick. On every call it also reports how likely it considers each number. Each strip is the average of those reported probabilities; compare it with the card above, which shows what was actually picked.</p>
+    <div class="scroll"><div id="ptable"></div></div>
   </section>
 
   <section class="card">
@@ -263,20 +269,20 @@
 
   <section class="card">
     <h2>Where each family's answers land</h2>
-    <p class="sub">All models and efforts of a family pooled into one curve. Peaks on the same numbers mean the two families share favourites; the flat line is what truly random picking gives.</p>
+    <p class="sub">Everything a family's models answered, pooled into one curve. Peaks on the same numbers mean the two families share favourites; the flat line is what truly random picking gives.</p>
     <div class="keys" id="famkeys"></div>
     <div class="plot" id="famline"></div>
   </section>
 
   <section class="card">
-    <h2>Does more reasoning effort make the picks more random?</h2>
-    <p class="sub">Spread of each model's answers at low, medium and high effort (1 = every number equally likely). A line that climbs means thinking harder spreads the picks out.</p>
+    <h2 id="efforth"></h2>
+    <p class="sub" id="effortsub"></p>
     <div class="panels" id="effort"></div>
   </section>
 
   <section class="card">
     <h2>How long does each answer take?</h2>
-    <p class="sub">Typical (median) time from sending the question to receiving the full reply, in seconds, at each reasoning effort. The thin line reaches the time 90% of calls finished within.</p>
+    <p class="sub" id="timesub"></p>
     <div class="keys" id="timekeys"></div>
     <div class="plot" id="timing"></div>
   </section>
@@ -298,7 +304,7 @@
 
   <section class="card">
     <h2>Summary card</h2>
-    <p class="sub">One square picture of the test selected at the top, made for a screenshot. Each strip pools a model's answers at all three efforts.</p>
+    <p class="sub">One square picture of the test selected at the top, made for a screenshot. Each strip pools all of a model's answers.</p>
     <div id="share"></div>
   </section>
 
@@ -348,7 +354,12 @@ if (URLQ.get('only')) {
   const sec = (document.getElementById(URLQ.get('only')) || document.body).closest('section');
   if (sec) { document.body.classList.add('only'); sec.classList.add('onlyshow'); if (URLQ.get('only') === 'share') sec.classList.add('solo'); }
 }
+// `range` is the id of the test shown: "10", "100", "1000" for the language models, "10d" for the decision APIs.
 let S = null, range = null, metric = 'jsd', sig = '', refs = {}, lastVersion = -1, lastKey = '';
+// A decision model has no reasoning effort. What differs between its rows is the order the options are listed in.
+const words = v => v.suite === 'decisions'
+  ? { dec: true, col: 'Option order', unit: 'order', pooled: 'all option orders pooled', models: 'decision models' }
+  : { dec: false, col: 'Effort', unit: 'effort', pooled: 'all efforts pooled', models: 'AI models' };
 
 /* ---------- distribution strips ---------- */
 function drawStrip(cv) {
@@ -380,7 +391,7 @@ function stripHover(e) {
   const tip = $('tip'); tip.textContent = '';
   tip.append(el('strong', null, d.total ? pct(d.bins[i] / d.total) : 'no answers yet'),
              el('span', null, d.size === 1 ? 'picked ' + lo : 'picked ' + lo + ' to ' + hi),
-             el('span', null, d.ideal ? 'expected share' : fmt(d.bins[i]) + ' of ' + fmt(d.total) + ' answers'));
+             el('span', null, d.ideal ? 'expected share' : d.note ? d.note : fmt(d.bins[i]) + ' of ' + fmt(d.total) + ' answers'));
   tip.style.display = 'block';
   const tw = tip.offsetWidth;
   tip.style.left = Math.max(8, Math.min(window.innerWidth - tw - 8, e.clientX + 14)) + 'px';
@@ -415,8 +426,8 @@ function headRow(view, col2) {
   return head;
 }
 function buildTable(view) {
-  const t = $('table'); t.textContent = ''; refs = {}; wsig = '';
-  t.append(headRow(view, 'Effort'));
+  const t = $('table'); t.textContent = ''; refs = {}; wsig = ''; psig = '';
+  t.append(headRow(view, words(view).col));
   addRow(t, 'ideal', 'ref', 'Perfectly random', '');
   for (const fam of view.families) {
     addRow(t, 'fam:' + fam.family, 'fam', fam.family + (fam.control ? ', pooled' : ' family, pooled'), '');
@@ -444,7 +455,9 @@ function fillRow(key, d, view) {
 }
 
 function renderTable(view) {
-  const newSig = view.k + ':' + view.families.map(f => f.models.map(m => m.id + m.rows.map(r => r.effort)).join()).join();
+  $('tablesub').textContent = (words(view).dec ? 'Each strip is one model with the options listed in one order.' : 'Each strip is one model at one reasoning effort.')
+    + ' A stronger colour means that number was picked more often. A truly random picker looks like the flat top row.';
+  const newSig = view.id + ':' + view.families.map(f => f.models.map(m => m.id + m.rows.map(r => r.effort)).join()).join();
   if (newSig !== sig) { buildTable(view); sig = newSig; }
   const nb = Math.ceil(view.k / view.bin_size);
   fillRow('ideal', { ideal: true, bins: Array(nb).fill(1), total: nb,
@@ -455,13 +468,51 @@ function renderTable(view) {
   }
 }
 
+/* ---------- decision models: the probabilities they report ---------- */
+let psig = '';
+function renderProbs(view) {
+  const card = $('probcard'), dec = view.suite === 'decisions';
+  card.style.display = dec ? '' : 'none';
+  if (!dec) return;
+  const fams = view.families.filter(f => !f.control), t = $('ptable');
+  const sigNow = view.id + '|' + fams.map(f => f.models.map(m => m.id + ':' + m.rows.map(r => r.effort).join()).join()).join('|');
+  if (sigNow !== psig) {
+    psig = sigNow; t.textContent = '';
+    const head = headRow(view, 'Option order');
+    ['Calls', 'Most likely', 'Picked most', 'Spread of the probabilities'].forEach((h, i) => { head.children[3 + i].textContent = h; });
+    t.append(head);
+    fams.forEach(f => f.models.forEach(m => {
+      addRow(t, 'p:' + m.id + '|all', 'first', m.label, 'all orders');
+      m.rows.forEach(r => addRow(t, 'p:' + m.id + '|' + r.effort, '', '', r.effort));
+    }));
+  }
+  const fill = (key, probs, calls, picked) => {
+    const r = refs[key]; if (!r) return;
+    r.cv._d = { bins: probs || Array(view.k).fill(0), total: probs ? 1 : 0, size: 1, k: view.k, note: 'average reported probability' };
+    drawStrip(r.cv);
+    r.tick.style.display = 'none';
+    if (!probs) { r.n.textContent = r.top.textContent = r.mean.textContent = r.val.textContent = ''; r.fill.style.width = '0'; return; }
+    let best = 0, h = 0;
+    probs.forEach((p, i) => { if (p > probs[best]) best = i; if (p > 0) h -= p * Math.log(p); });
+    h /= Math.log(view.k);
+    r.n.textContent = fmt(calls);
+    r.top.textContent = (best + 1) + ' \u00b7 ' + pct(probs[best]);
+    r.mean.textContent = picked.n ? picked.mode + ' \u00b7 ' + pct(picked.mode_share) : '';
+    r.fill.style.width = (h * 100) + '%'; r.val.textContent = h.toFixed(2);
+  };
+  fams.forEach(f => f.models.forEach(m => {
+    fill('p:' + m.id + '|all', m.probs, m.pooled.stats.n, m.pooled.stats);
+    m.rows.forEach(r => fill('p:' + m.id + '|' + r.effort, r.probs, r.stats.n, r.stats));
+  }));
+}
+
 /* ---------- rewording check ---------- */
 let wsig = '';
 function renderWording(view) {
-  const fams = view.families.filter(f => !f.control), ids = Object.keys(S.prompts), extra = ids.filter(x => x !== 'main');
+  const fams = view.families.filter(f => !f.control), ids = Object.keys(view.prompts), extra = ids.filter(x => x !== 'main');
   const lab = id => id === 'main' ? 'main' : 'reword ' + (extra.indexOf(id) + 1);
   const t = $('wtable');
-  const sigNow = view.k + '|' + fams.map(f => f.models.map(m => m.id + ':' + m.wording.map(w => w.prompt_id).join()).join()).join('|');
+  const sigNow = view.id + '|' + fams.map(f => f.models.map(m => m.id + ':' + m.wording.map(w => w.prompt_id).join()).join()).join('|');
   if (sigNow !== wsig) {
     wsig = sigNow; t.textContent = '';
     t.append(headRow(view, 'Prompt'));
@@ -476,10 +527,11 @@ function renderWording(view) {
     const main = m.wording.find(w => w.prompt_id === 'main'), others = m.wording.filter(w => w.prompt_id !== 'main' && w.stats.n);
     if (main && main.stats.n && others.length) { total++; if (others.every(w => w.stats.mode === main.stats.mode)) same++; }
   }));
-  $('wsub').textContent = 'The same question asked ' + ids.length + ' ways, all at ' + S.samples.para_effort + ' reasoning effort: ' + S.samples.main
-    + ' answers per model for the main prompt and ' + S.samples.para + ' for each rewording. If the wording mattered, the strips of one model would differ.';
+  $('wsub').textContent = 'The same question asked ' + ids.length + ' ways, all '
+    + (words(view).dec ? 'with the options in ' + view.samples.para_effort + ' order: ' : 'at ' + view.samples.para_effort + ' reasoning effort: ') + view.samples.main
+    + ' answers per model for the main prompt and ' + view.samples.para + ' for each rewording. If the wording mattered, the strips of one model would differ.';
   const pr = $('wprompts'); pr.textContent = '';
-  ids.forEach(id => { const d = el('div', null, lab(id) + ': '); d.append(el('q', null, S.prompts[id].replace('{max}', view.k))); pr.append(d); });
+  ids.forEach(id => { const d = el('div', null, lab(id) + ': '); d.append(el('q', null, view.prompts[id].replace('{max}', view.k))); pr.append(d); });
   $('wsum').textContent = !total ? 'No rewording answers yet.'
     : (same === total ? '\u2713 ' : '') + 'In ' + same + ' of ' + total + ' models the most picked number is the same for every wording.';
 }
@@ -560,7 +612,11 @@ function renderFamLines(view) {
 }
 
 function renderEffort(view) {
-  const host = $('effort');
+  const host = $('effort'), WD = words(view);
+  $('efforth').textContent = WD.dec ? 'Does the order of the options change the picks?' : 'Does more reasoning effort make the picks more random?';
+  $('effortsub').textContent = WD.dec
+    ? 'Spread of each model\u2019s picks with the options listed in each order (1 = every number equally likely). A flat line means the order makes no difference to how varied the picks are.'
+    : 'Spread of each model\u2019s answers at low, medium and high effort (1 = every number equally likely). A line that climbs means thinking harder spreads the picks out.';
   const cols = famColors(view), famColor = i => cols[i];
   const llm = view.families.map((f, i) => [f, i]).filter(o => !o[0].control);   // effort does not apply to the control
   if (host.childElementCount !== llm.length) {
@@ -586,7 +642,7 @@ function renderEffort(view) {
       if (y1 - y0 < step * 2) y0 = Math.max(0, y1 - step * 2);
     }
     const x = j => m.l + 18 + (efforts.length > 1 ? j / (efforts.length - 1) : .5) * (pw - 36), y = v => m.t + (1 - (v - y0) / (y1 - y0)) * ph;
-    const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Spread of answers by reasoning effort, ' + fam.family + ' models' });
+    const svg = sv('svg', { width: W, height: H, role: 'img', 'aria-label': 'Spread of answers by ' + (WD.dec ? 'option order' : 'reasoning effort') + ', ' + fam.family + ' models' });
     for (let v = y0; v <= y1 + 1e-9; v += step) {
       svg.append(sv('line', { class: v - y0 > 1e-9 ? 'g' : 'ax', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
                  sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, v.toFixed(2)));
@@ -617,14 +673,16 @@ function renderEffort(view) {
     finishPlot(box, svg, {
       index: px => { let best = 0; efforts.forEach((_, j) => { if (Math.abs(x(j) - px) < Math.abs(x(best) - px)) best = j; }); return best; },
       cross: j => { if (j == null) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(j)); cross.setAttribute('x2', x(j)); cross.setAttribute('visibility', 'visible'); } },
-      tip: j => [el('span', null, efforts[j] + ' effort'), ...series.map(s => tipRow(famColor(fi), s.pts[j] == null ? 'no data' : s.pts[j].toFixed(2), s.label))],
+      tip: j => [el('span', null, efforts[j] + ' ' + WD.unit), ...series.map(s => tipRow(famColor(fi), s.pts[j] == null ? 'no data' : s.pts[j].toFixed(2), s.label))],
     });
   });
 }
 
 /* ---------- run status (rounds, like epochs) ---------- */
 function renderRun(view) {
-  const T = S.tests.find(t => t.k === range), H = T.history, last = H[H.length - 1];
+  const T = S.tests.find(t => t.id === range), H = T.history, last = H[H.length - 1], WD = words(view);
+  $('runsub').textContent = 'Every model is asked the same question ' + T.rounds + ' times ' + (WD.dec ? 'for each order of the options' : 'at each effort level')
+    + '. A round is finished when every model has answered one more time, so "round 11" means everyone has answered at least 11 times. Round ' + T.rounds + ' is the end of the test.';
   $('eround').textContent = 'Round ' + T.round + ' of ' + T.rounds;
   $('esub').textContent = { idle: 'not started', running: 'running', pausing: 'pausing', paused: 'paused', done: 'complete' }[T.status]
     + (last ? ' \u00b7 ' + fmt(last.calls) + ' API calls \u00b7 ' + money(last.spent) + ' spent on this test' : '');
@@ -642,7 +700,12 @@ function renderRun(view) {
   }));
 
   const Q = T.quality, qx = $('qcx'); qx.textContent = '';
-  $('qc').textContent = !Q.total ? 'Quality check: every reply must be a number and nothing else. No replies yet.'
+  $('qc').textContent = WD.dec
+    ? (!Q.total ? 'Quality check: every answer must be one of the options, with a probability for each option. No answers yet.'
+      : Q.clean === Q.total ? '\u2713 Quality check passed: all ' + fmt(Q.total) + ' answers were one of the options, each with a full set of probabilities.'
+      : '\u26a0 Quality check: ' + fmt(Q.clean) + ' of ' + fmt(Q.total) + ' answers were a valid pick with a full set of probabilities. ' + fmt(Q.extra)
+        + ' were a valid pick with probabilities missing (still counted) and ' + fmt(Q.unusable) + ' gave no usable pick (left out). Latest:')
+    : !Q.total ? 'Quality check: every reply must be a number and nothing else. No replies yet.'
     : Q.clean === Q.total ? '\u2713 Quality check passed: all ' + fmt(Q.total) + ' replies were a number and nothing else.'
     : '\u26a0 Quality check: ' + fmt(Q.clean) + ' of ' + fmt(Q.total) + ' replies were a number and nothing else. ' + fmt(Q.extra)
       + ' had extra text around the number (still counted) and ' + fmt(Q.unusable) + ' had no usable number (left out). Latest:';
@@ -692,11 +755,13 @@ function renderRun(view) {
 
 /* ---------- response time ---------- */
 function renderTiming(view) {
-  const box = $('timing'), fams = view.families.filter(f => !f.control);
+  const box = $('timing'), fams = view.families.filter(f => !f.control), WD = words(view);
+  $('timesub').textContent = 'Typical (median) time from sending the question to receiving the full ' + (WD.dec ? 'answer, in seconds, for each order of the options' : 'reply, in seconds, at each reasoning effort')
+    + '. The thin line reaches the time 90% of calls finished within.';
   const efforts = []; fams.forEach(f => f.models.forEach(mo => mo.rows.forEach(r => { if (!efforts.includes(r.effort)) efforts.push(r.effort); })));
   const ecol = e => 'var(--e' + (Math.min(efforts.indexOf(e), 2) + 1) + ')';
   const keys = $('timekeys'); keys.textContent = '';
-  efforts.forEach(e => { const s = el('span'), k = el('i', 'sq'); k.style.background = ecol(e); s.append(k, e + ' effort'); keys.append(s); });
+  efforts.forEach(e => { const s = el('span'), k = el('i', 'sq'); k.style.background = ecol(e); s.append(k, e + ' ' + WD.unit); keys.append(s); });
   const W = Math.max(320, box.clientWidth), m = { l: 176, r: 84, t: 4, b: 32 }, bh = 16, gap = 2, mg = 18, fh = 30;
   let max = 0, yy = m.t; const lay = [];
   fams.forEach(f => {
@@ -729,9 +794,9 @@ function renderTiming(view) {
                                       sv('line', { class: 'ref', x1: xp, x2: xp, y1: y0 + 4, y2: y0 + bh - 4 }));
       svg.append(sv('text', { class: 'lb', x: Math.max(xp, x0 + w) + 8, y: y0 + bh / 2 + 5 }, r.time.median.toFixed(2) + ' s'));
       const hit = sv('rect', { x: x0, y: y0 - 1, width: W - x0, height: bh + 2, fill: 'transparent' });
-      hit.addEventListener('pointermove', e => placeTip(e, [el('span', null, mo.label + ' \u00b7 ' + r.effort + ' effort'),
+      hit.addEventListener('pointermove', e => placeTip(e, [el('span', null, mo.label + ' \u00b7 ' + r.effort + ' ' + WD.unit),
         el('strong', null, r.time.median.toFixed(2) + ' s typical'), el('span', null, '90% of calls within ' + r.time.p90.toFixed(2) + ' s'),
-        el('span', null, 'reasoning tokens per call: ' + r.rtok.toFixed(1))]));
+        ...(WD.dec ? [] : [el('span', null, 'reasoning tokens per call: ' + r.rtok.toFixed(1))])]));
       hit.addEventListener('pointerleave', () => { $('tip').style.display = 'none'; });
       svg.append(hit);
     });
@@ -742,8 +807,8 @@ function renderTiming(view) {
 /* ---------- summary card ---------- */
 let shareSig = '', sh = null;
 function renderShare(view) {
-  const box = $('share'), T = S.tests.find(t => t.k === range), nb = Math.ceil(view.k / view.bin_size);
-  const sigNow = view.k + '|' + view.families.map(f => f.family + ':' + f.models.map(m => m.id).join()).join('|');
+  const box = $('share'), T = S.tests.find(t => t.id === range), nb = Math.ceil(view.k / view.bin_size), WD = words(view);
+  const sigNow = view.id + '|' + view.families.map(f => f.family + ':' + f.models.map(m => m.id).join()).join('|');
   if (sigNow !== shareSig) {
     shareSig = sigNow; box.textContent = ''; sh = { rows: [] };
     sh.title = el('div', 'sh-t'); sh.sub = el('div', 'sh-s'); sh.num = el('div', 'sh-num'); sh.ht = el('div', 'sh-ht');
@@ -773,13 +838,13 @@ function renderShare(view) {
     });
     sh.foot = el('span');
     const f = el('div', 'sh-f'); f.append(sh.foot, el('span', null, new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })));
-    box.append(el('div', 'sh-k', 'Random number benchmark'), sh.title, sh.sub, hero, rows, f);
+    box.append(el('div', 'sh-k', 'Random number benchmark' + (WD.dec ? ' \u00b7 decision APIs' : '')), sh.title, sh.sub, hero, rows, f);
   }
   const L = view.llm.stats, models = view.families.filter(f => !f.control).reduce((a, f) => a + f.models.length, 0);
-  sh.title.textContent = '\u201c' + S.prompts.main.replace('{max}', view.k) + '\u201d';
+  sh.title.textContent = '\u201c' + view.prompts.main.replace('{max}', view.k) + '\u201d';
   const effs = []; view.families.forEach(f => { if (!f.control) f.models.forEach(m => m.rows.forEach(r => { if (!effs.includes(r.effort)) effs.push(r.effort); })); });
-  sh.sub.textContent = !L.n ? 'No answers yet' : fmt(L.n) + ' answers from ' + models + ' AI models'
-    + (T.status === 'done' ? ': ' + S.samples.main + ' per model at each reasoning effort (' + effs.join(', ') + ')' : ' so far');
+  sh.sub.textContent = !L.n ? 'No answers yet' : fmt(L.n) + ' answers from ' + models + ' ' + WD.models
+    + (T.status === 'done' ? ': ' + view.samples.main + ' per model ' + (WD.dec ? 'for each order of the options (' : 'at each reasoning effort (') + effs.join(', ') + ')' : ' so far');
   // The five most picked numbers: from the server, or counted here when every strip cell is one number.
   let top = view.llm.top;
   if (!top && view.bin_size === 1) top = view.llm.bins.map((c, i) => [i + 1, c]).filter(t => t[1]).sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 5);
@@ -803,7 +868,9 @@ function renderShare(view) {
     drawStrip(r.cv);
     r.top.textContent = s.n ? s.mode + ' \u00b7 ' + pct(s.mode_share) : '';
   });
-  sh.foot.textContent = 'Each strip is all of a model\u2019s answers, every effort together. A fresh conversation every time. Stronger colour = picked more often.';
+  sh.foot.textContent = WD.dec
+    ? 'Each strip is all of a model\u2019s picks, every option order together. A decision model returns a pick and probabilities, not text. Stronger colour = picked more often.'
+    : 'Each strip is all of a model\u2019s answers, every effort together. A fresh conversation every time. Stronger colour = picked more often.';
 }
 
 /* ---------- family comparison ---------- */
@@ -815,8 +882,8 @@ function tile(label, value, sub, words) {
 function renderMatrix(view) {
   const m = view.matrix, D = m[metric], n = m.labels.length, test = m.test[metric];
   $('mxsub').textContent = (metric === 'jsd'
-    ? 'Distance between two models’ answer distributions, all efforts pooled (Jensen–Shannon divergence: 0 = identical, 1 = no overlap' + (view.bin_size > 1 ? '; answers grouped in bins of ' + view.bin_size : '') + ').'
-    : 'Distance between two models’ answer distributions, all efforts pooled (earth mover’s distance scaled to 0–1, so picking 6 instead of 7 still counts as close).')
+    ? 'Distance between two models’ answer distributions, ' + words(view).pooled + ' (Jensen–Shannon divergence: 0 = identical, 1 = no overlap' + (view.bin_size > 1 ? '; answers grouped in bins of ' + view.bin_size : '') + ').'
+    : 'Distance between two models’ answer distributions, ' + words(view).pooled + ' (earth mover’s distance scaled to 0–1, so picking 6 instead of 7 still counts as close).')
     + (darkMQ.matches ? ' Brighter' : ' Darker') + ' cells are more alike.';
   const tiles = $('tiles'); tiles.textContent = '';
   if (test) {
@@ -869,11 +936,11 @@ function eta(s) {
   if (s < 5400) return 'about ' + Math.round(s / 60) + ' min left';
   return 'about ' + (s / 3600).toFixed(1) + ' h left';
 }
-const tname = k => '1–' + k;
+const tname = id => (S.tests.find(t => t.id === id) || {}).label || id;
 function renderTop() {
   $('demo').hidden = !S.demo && !STATIC;
   if (STATIC) $('demo').textContent = 'Results snapshot, ' + S.snapshot_date;
-  const T = S.tests.find(t => t.k === range), busy = S.active != null && S.active !== range;
+  const T = S.tests.find(t => t.id === range), busy = S.active != null && S.active !== range;
   const b = $('run'), st = T.status, name = tname(range);
   b.textContent = busy ? 'Run ' + name + ' test'
     : { idle: 'Run ' + name + ' test', running: 'Pause', pausing: 'Pausing…', paused: 'Resume ' + name + ' test', done: name + ' test complete' }[st];
@@ -887,16 +954,17 @@ function renderTop() {
   let msg = T.message || '';
   if (!msg && st === 'done') {
     const next = S.tests.find(t => t.status !== 'done');
-    msg = next ? name + ' test complete. Select the ' + tname(next.k) + ' test and press Run.' : 'All tests are complete.';
+    msg = next ? name + ' test complete. Select the ' + next.label + ' test and press Run.' : 'All tests are complete.';
   }
   $('message').textContent = STATIC ? '' : msg;
   [...$('ranges').children].forEach((btn, i) => {
     const t = S.tests[i];
-    btn.textContent = tname(t.k) + (t.status === 'done' ? ' ✓' : t.done ? ' · ' + Math.floor(t.done / t.target * 100) + '%' : '');
+    btn.textContent = t.label + (t.status === 'done' ? ' ✓' : t.done ? ' · ' + Math.floor(t.done / t.target * 100) + '%' : '');
   });
   const box = $('providers'); box.textContent = '';
   for (const p of S.providers) {
-    const bt = p.by_test[String(range)];
+    const bt = p.by_test[range];
+    if (!bt || !bt.target) continue;     // this provider has no part in the selected test
     const d = el('div', 'prov'), head = el('div', 'pname');
     head.append(el('span', null, p.name), el('span', null, S.active === range ? p.state : ''));
     const val = el('div', 'pval', money(p.spent) + ' '); val.append(el('small', null, 'of ' + money(p.cap) + ' budget, all tests'));
@@ -912,16 +980,21 @@ function renderTop() {
   for (const r of S.recent) {
     const li = el('li');
     li.append(el('span', 'ft', new Date(r.t * 1000).toLocaleTimeString('en-GB')),
-              el('span', 'fl', r.label + ' · ' + r.effort + ' · 1–' + r.k),
+              el('span', 'fl', r.label + ' · ' + r.effort + ' · ' + (r.test || '1–' + r.k)),
               el('span', 'fv', r.valid ? r.text : '“' + r.text + '” (not valid)'));
     feed.append(li);
   }
   const iss = $('issues'); iss.textContent = ''; S.issues.forEach(t => iss.append(el('li', null, t)));
   const pr = $('prompts'); pr.textContent = '';
-  const line = (lead, id) => { const d = el('div', null, lead + ' '); d.append(el('q', null, S.prompts[id].replace('{max}', range))); return d; };
-  pr.append(line('Prompt sent to every model, ' + S.samples.main + ' times per effort level:', 'main'));
-  Object.keys(S.prompts).filter(id => id !== 'main').forEach(id => pr.append(line('Rewording check, ' + S.samples.para + ' times at ' + S.samples.para_effort + ' effort:', id)));
-  pr.append(el('div', null, 'Nothing else is sent: no system prompt and no earlier messages. Replies are free text, and each one is checked to be a number and nothing else.'));
+  const V = S.views[range], WD = words(V), sm = V.samples;
+  const line = (lead, id) => { const d = el('div', null, lead + ' '); d.append(el('q', null, V.prompts[id].replace('{max}', V.k))); return d; };
+  pr.append(line((WD.dec ? 'Question sent to every model, ' + sm.main + ' times for each order of the options:' : 'Prompt sent to every model, ' + sm.main + ' times per effort level:'), 'main'));
+  Object.keys(V.prompts).filter(id => id !== 'main').forEach(id => pr.append(line('Rewording check, ' + sm.para + ' times '
+    + (WD.dec ? 'with the options in ' + sm.para_effort + ' order:' : 'at ' + sm.para_effort + ' effort:'), id)));
+  pr.append(el('div', null, WD.dec
+    ? 'With the question go the options, the numbers 1 to ' + V.k + ', and nothing else: no system prompt and no other input. A decision model does not write a reply. It returns one pick, a probability for every option and a confidence.'
+    : 'Nothing else is sent: no system prompt and no earlier messages. Replies are free text, and each one is checked to be a number and nothing else.'));
+  $('livesub').textContent = WD.dec ? 'The question every model receives, and the latest picks as they arrive from the APIs.' : 'The prompts every model receives, and the latest replies as they arrive from the APIs.';
   if (!STATIC) { $('datafile').textContent = T.file; $('allfile').textContent = S.data_file; }
 }
 
@@ -933,20 +1006,20 @@ function renderCharts(force) {
   const hex = emptyColor.replace('#', '');
   if (hex.length === 6) emptyRGB = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
   $('lgramp').style.background = 'linear-gradient(90deg,' + Array.from({ length: 21 }, (_, i) => heat(Math.pow(Math.max(i, 0.4) / 20, 2))).join(',') + ')';
-  const view = S.views[String(range)];
-  renderRun(view); renderTable(view); renderWording(view); renderFamLines(view); renderEffort(view); renderTiming(view); renderMatrix(view); renderShare(view);
+  const view = S.views[range];
+  renderRun(view); renderTable(view); renderProbs(view); renderWording(view); renderFamLines(view); renderEffort(view); renderTiming(view); renderMatrix(view); renderShare(view);
 }
 
 function renderRanges() {
-  const box = $('ranges'); if (box.childElementCount === S.ranges.length) return;
+  const box = $('ranges'); if (box.childElementCount === S.tests.length) return;
   box.textContent = '';
   if (range == null) {   // ?test=10 opens that test; otherwise the first test still to run
-    const want = +URLQ.get('test');
+    const want = URLQ.get('test');
     const first = STATIC ? [...S.tests].reverse().find(t => t.done) : S.tests.find(t => t.status !== 'done');   // snapshot: newest test with data
-    range = S.ranges.includes(want) ? want : (first || S.tests[0]).k;
+    range = S.tests.some(t => t.id === want) ? want : (first || S.tests[0]).id;
   }
-  for (const k of S.ranges) {
-    const b = el('button', null, '1–' + k); b.setAttribute('aria-pressed', k === range);
+  for (const t of S.tests) {
+    const k = t.id, b = el('button', null, t.label); b.setAttribute('aria-pressed', k === range);
     b.onclick = () => { range = k; [...box.children].forEach(c => c.setAttribute('aria-pressed', c === b)); renderTop(); renderCharts(); };
     box.append(b);
   }
@@ -982,9 +1055,9 @@ async function poll() {
   }
 }
 $('run').onclick = async () => {
-  const live = S && S.active === range && S.tests.find(t => t.k === range).status === 'running';
+  const live = S && S.active === range && S.tests.find(t => t.id === range).status === 'running';
   $('run').disabled = true;
-  await fetch(live ? '/api/pause' : '/api/run?range=' + range, { method: 'POST', headers: { 'X-Bench': '1' } });
+  await fetch(live ? '/api/pause' : '/api/run?test=' + encodeURIComponent(range), { method: 'POST', headers: { 'X-Bench': '1' } });
   poll();
 };
 [...$('metrics').children].forEach(b => b.onclick = () => {
