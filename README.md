@@ -1,11 +1,14 @@
 # LLM Random Number Benchmark
 
 <p align="center">
-  <img src="docs/figures/summary-card-1-10.png" alt="97 percent of 4,800 answers to 'pick a random number between 1 and 10' were 7" width="620">
+  <img src="docs/figures/summary-card-1-10.png" alt="1 to 10: 97 percent of 4,800 answers were 7" width="49%">
+  <img src="docs/figures/summary-card-1-100.png" alt="1 to 100: 93 percent of 4,800 answers were one of five numbers" width="49%">
 </p>
 
 <p align="center">
   <a href="https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark"><img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/dataset-on-hf-md.svg" alt="Dataset on Hugging Face"></a>
+  &nbsp;
+  <a href="https://gptaiacademy.com/benchmarks/random-number"><img src="https://img.shields.io/badge/live%20results-gptaiacademy.com-2a78d6" alt="Live results on gptaiacademy.com" height="31"></a>
 </p>
 
 What happens when you ask a language model to pick a random number, thousands of times?
@@ -19,10 +22,10 @@ with each other and with a real random number generator.
 | Test | Question | Status | API calls | Cost |
 |---|---|---|---|---|
 | 1–10 | "Pick a random number between 1 and 10. Reply with only the number." | **Complete** (18 Nov 2026) | 5,600 | $1.31 |
-| 1–100 | same, 1 to 100 | Not run yet | | |
+| 1–100 | same, 1 to 100 | **Complete** (18 Nov 2026) | 5,600 | $1.21 |
 | 1–1000 | same, 1 to 1000 | Not run yet | | |
 
-Results below are for the 1–10 test only. This README is updated as each test finishes.
+Results for the two finished tests are below. This README is updated as each test finishes.
 
 ## Results: 1–10
 
@@ -71,6 +74,55 @@ Shares are over the 600 main-prompt answers per model; costs include the 100 rew
 
 ![Median response time](docs/figures/timing-1-10.png)
 
+## Results: 1–100
+
+**93% of all answers were one of just five numbers: 47, 73, 37, 67 and 57.** Fair random picking would put 5% there.
+
+- **80 of the 100 numbers were never picked.** 4,800 answers landed on only 20 different numbers, and three of those appeared just once or twice.
+- **No single favourite this time.** 47 leads with 38.7%, then 73 (29.0%), 37 (14.7%), 67 (7.6%) and 57 (3.1%). The famous 42 got 2.2%.
+- **The models avoid anything that looks round or obvious.** Not one answer was a multiple of 5. 95% were odd, 64% ended in 7, and 99.7% fell between 30 and 80.
+- **Unlike 1–10, the models now disagree with each other.** Each has its own favourite (table below), and the distance between two models is roughly twenty times larger than in the 1–10 test (0.36 to 0.41, against 0.02).
+- **A family signal, suggestive but not established.** Claude models favour 47 (57% of their answers) and GPT models favour 73 (40%). Same-family models are somewhat closer to each other than cross-family ones (0.36 against 0.41), but the permutation test gives p = 0.11.
+- **More reasoning effort widens the spread a little, and nowhere near enough.** GPT-6.2 Astra goes from 0.21 at low effort to 0.38 at high, Claude Haiku 5.5 from 0.22 to 0.38. The Python control scores 0.93 to 0.95.
+- **The models know the clichés.** From the saved reasoning: *"I'll go with 58, avoiding the usual picks like 42 or 73."* Avoiding them just moves the answer to another member of the same small set.
+- **Wording now matters for some models.** In 5 of 8 models the favourite is the same for all three wordings. Claude Haiku 5.5, Claude Opus 5.5 and GPT-6.2 Astra switch favourite (among 37, 47 and 73) under one of the rewordings.
+- **Quality check: 5,597 of 5,600 replies were a number and nothing else.** Three replies from Claude Opus 5.5 began with an invisible byte-order-mark character before the number; they are counted and flagged.
+
+| Model | Top pick | Second | Third | Different numbers used | Cost of its 700 calls |
+|---|---|---|---|---|---|
+| GPT-6 Luna | 47 (54%) | 73 (20%) | 37 (15%) | 6 | $0.008 |
+| GPT-6.1 Terra | 73 (94%) | 47 (5%) | 57 (<1%) | 7 | $0.066 |
+| GPT-6.2 Sol | 67 (52%) | 73 (26%) | 63 (9%) | 11 | $0.068 |
+| GPT-6.2 Astra | 37 (54%) | 73 (19%) | 47 (14%) | 15 | $0.285 |
+| Claude Haiku 5.5 | 37 (39%) | 73 (25%) | 47 (24%) | 12 | $0.006 |
+| Claude Sonnet 5.5 | 47 (90%) | 37 (6%) | 42 (4%) | 6 | $0.064 |
+| Claude Opus 5.5 | 47 (53%) | 73 (24%) | 42 (13%) | 10 | $0.255 |
+| Claude Fable 5.2 | 47 (61%) | 73 (25%) | 57 (12%) | 5 | $0.456 |
+
+Shares are over the 600 main-prompt answers per model. The run was interrupted once at 4,660 calls and resumed about four minutes later. Every cell continues from its own count, so the interruption does not change which cells were sampled or how often.
+
+### Every model at every effort
+
+![Answer distribution per model and effort, 1–100](docs/figures/distributions-1-100.png)
+
+### Do the two families pick differently?
+
+![Family curves, 1–100](docs/figures/family-curves-1-100.png)
+
+![Distance between models, 1–100](docs/figures/family-distance-1-100.png)
+
+### Does more reasoning effort make the picks more random?
+
+![Spread of answers by reasoning effort, 1–100](docs/figures/effort-1-100.png)
+
+### Does the wording matter?
+
+![Rewording check, 1–100](docs/figures/wording-1-100.png)
+
+### How long does each answer take?
+
+![Median response time, 1–100](docs/figures/timing-1-100.png)
+
 ## Method
 
 | | |
@@ -105,11 +157,11 @@ $0.88 at Anthropic.
 
 ## Data
 
-Everything the benchmark recorded is in this repository. The same data is on Hugging Face, where it can be browsed row by row: https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark
+Browse the results interactively at https://gptaiacademy.com/benchmarks/random-number. Everything the benchmark recorded is in this repository. The same data is on Hugging Face, where it can be browsed row by row: https://huggingface.co/datasets/diegocp01/llm-random-number-benchmark
 
 | File | Contents |
 |---|---|
-| `data/test_1-10.json` | Every call of the 1–10 test, one JSON record each, including the control draws |
+| `data/test_1-10.json`, `data/test_1-100.json` | Every call of that test, one JSON record each, including the control draws |
 | `data/results.jsonl` | Results only, all tests, one line per call |
 | `results/summary.csv` | One row per model × effort × range × prompt: counts, mean, SD, mode, spread, chi-square test, cost |
 
