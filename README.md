@@ -177,6 +177,10 @@ Shares are over the valid main-prompt answers per model (600, except 598 for Cla
 
 ## Results: 1–10 (Decisions API)
 
+<p align="center">
+  <img src="docs/figures/summary-card-1-10-decisions.png" alt="OpenAI Decisions puts 55 percent on 7 and flips to 6 when the options are reversed; Jev stays on 5 at about 19 percent" width="820">
+</p>
+
 **OpenAI's decision model puts 55% on 7, and changes its answer to 6 when the same ten options are listed in reverse. Jev spreads its probabilities almost evenly and reports that it is not confident.**
 
 A decision model returns its most likely option, not a draw, so its picks say little about randomness. The result here is the probability it reports for each number.
