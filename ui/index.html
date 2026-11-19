@@ -967,12 +967,16 @@ function renderTop() {
     if (!bt || !bt.target) continue;     // this provider has no part in the selected test
     const d = el('div', 'prov'), head = el('div', 'pname');
     head.append(el('span', null, p.name), el('span', null, S.active === range ? p.state : ''));
-    const val = el('div', 'pval', money(p.spent) + ' '); val.append(el('small', null, 'of ' + money(p.cap) + ' budget, all tests'));
-    const meter = el('div', 'meter'), fill = el('i'); fill.style.width = Math.min(100, p.cap ? p.spent / p.cap * 100 : 0) + '%'; meter.append(fill);
-    const sub = ['this test: ' + fmt(bt.done) + ' / ' + fmt(bt.target) + ' calls',
-                 money(bt.spent) + ' spent' + (bt.projected != null ? ', ' + money(bt.projected) + ' projected' : '')];
+    // The big figure and the bar are this test alone. The budget is shared by all tests, so it sits on its own line.
+    const cents = x => x > 0 && x < 0.01 ? '$' + x.toFixed(3) : money(x);
+    const unfinished = bt.done < bt.target && bt.projected != null;
+    const val = el('div', 'pval', cents(bt.spent) + ' ');
+    val.append(el('small', null, 'spent on this test' + (unfinished ? ', about ' + cents(bt.projected) + ' when finished' : '')));
+    const meter = el('div', 'meter'), fill = el('i'); fill.style.width = Math.min(100, bt.target ? bt.done / bt.target * 100 : 0) + '%'; meter.append(fill);
+    const sub = [fmt(bt.done) + ' / ' + fmt(bt.target) + ' calls'];
     if (!STATIC) sub.push(S.demo ? 'simulated' : p.key ? '✓ API key found' : '○ no API key in .env yet');
-    d.append(head, val, meter, el('div', 'psub', sub.join(' · ')));
+    d.append(head, val, meter, el('div', 'psub', sub.join(' · ')),
+             el('div', 'psub', 'All tests together: ' + money(p.spent) + ' of the ' + money(p.cap) + ' budget'));
     box.append(d);
   }
   const feed = $('feed'); feed.textContent = '';
