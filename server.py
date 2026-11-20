@@ -26,8 +26,8 @@ import providers
 import stats
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-KEY_NAMES = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
-PROVIDER_NAMES = {"openai": "OpenAI", "anthropic": "Anthropic", "local": "Python baseline"}
+KEY_NAMES = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "typesafe": "TYPESAFE_API_KEY"}
+PROVIDER_NAMES = {"openai": "OpenAI", "anthropic": "Anthropic", "typesafe": "TypeSafe (Jev)", "local": "Python baseline"}
 
 
 def read_env_file():
@@ -50,10 +50,16 @@ def get_key(provider):
 
 
 class Cell:
-    """One (model, effort, range, prompt) combination."""
+    """One (model, effort, test, prompt) combination.
 
-    def __init__(self, order, model, effort, k, prompt_id, target):
+    For a decision model the "effort" slot holds the order the options are listed in."""
+
+    def __init__(self, order, model, effort, test, prompt_id, target):
+        k = test["k"]
         self.order = order
+        self.tid = test["id"]                          # which test this cell belongs to
+        self.suite = test["suite"]                     # "llm" or "decisions"
+        self.api_model = model.get("api_model", model["id"])
         self.provider = model["provider"]
         self.family = model["family"]
         self.model = model["id"]
@@ -76,10 +82,13 @@ class Cell:
         self.rtok = 0          # reasoning tokens
         self.lats = []         # seconds from request to full reply, one per call
         self.disabled = None   # reason string when skipped
+        self.psum = [0.0] * k  # decision models: sum of the probability reported for each number
+        self.pn = 0            # ...and how many calls reported probabilities
+        self.conf = 0.0        # ...and the sum of the reported confidence
 
     @property
     def key(self):
-        return (self.provider, self.model, self.effort, self.k, self.prompt_id)
+        return (self.provider, self.model, self.effort, self.tid, self.prompt_id)
 
 
 class Bench:
@@ -92,18 +101,35 @@ class Bench:
         self.results_path = os.path.join(self.data_dir, "results.jsonl")
         self.errors_path = os.path.join(self.data_dir, "errors.log")
 
+        # The tests, in tab order: one per range for the language models, then the
+        # decision-API tests. Each has its own id, its own file and its own Run.
+        dec = cfg.get("decisions") or {}
+        self.test_defs = [{"id": str(k), "k": k, "suite": "llm", "label": "1\u2013%d" % k, "name": "1-%d" % k,
+                           "file": "test_1-%d.json" % k, "prompts": cfg["prompts"],
+                           "para_effort": cfg.get("paraphrase_effort")} for k in cfg["ranges"]]
+        self.test_defs += [{"id": t["id"], "k": t["k"], "suite": "decisions", "label": t["label"],
+                            "name": "1-%d-decisions" % t["k"], "file": "test_1-%d_decisions.json" % t["k"],
+                            "prompts": dec["prompts"], "para_effort": dec.get("paraphrase_order"),
+                            "state": dec.get("input", "")} for t in dec.get("tests", [])]
+        self.tdef = {t["id"]: t for t in self.test_defs}
+        self.tids = [t["id"] for t in self.test_defs]
+
         self.cells = []
         self.by_key = {}
         order = 0
         for model in cfg["models"]:
-            for effort in model.get("efforts", cfg["efforts"]):
-                for k in cfg["ranges"]:
+            suite = model.get("suite", "llm")
+            efforts = model.get("efforts") or (dec.get("orders", []) if suite == "decisions" else cfg["efforts"])
+            for effort in efforts:
+                for test in self.test_defs:
+                    if not model.get("control") and suite != test["suite"]:
+                        continue       # the control runs in every test; a model only in its own kind
                     prompt_ids = ["main"]
-                    if effort == cfg.get("paraphrase_effort"):
-                        prompt_ids += [p for p in cfg["prompts"] if p != "main"]
+                    if effort == test["para_effort"]:
+                        prompt_ids += [p for p in test["prompts"] if p != "main"]
                     for pid in prompt_ids:
                         target = cfg["samples_per_cell"] if pid == "main" else cfg["paraphrase_samples"]
-                        cell = Cell(order, model, effort, k, pid, target)
+                        cell = Cell(order, model, effort, test, pid, target)
                         order += 1
                         self.cells.append(cell)
                         self.by_key[cell.key] = cell
@@ -111,13 +137,13 @@ class Bench:
         self.providers = {}
         for pid in dict.fromkeys(m["provider"] for m in cfg["models"]):
             self.providers[pid] = {
-                "spent": 0.0, "spent_by": {k: 0.0 for k in cfg["ranges"]}, "state": "idle",
+                "spent": 0.0, "spent_by": {t: 0.0 for t in self.tids}, "state": "idle",
                 "cap": float("inf") if pid == "local" else float(cfg["budget_usd"].get(pid, 0)),
                 "stopped": True, "inflight": 0, "backoff_until": 0.0, "streak": 0, "max_cost": 0.0,
             }
 
         # One test per range. Each is started by hand; only one runs at a time.
-        self.tests = {k: {"status": "idle", "message": ""} for k in cfg["ranges"]}
+        self.tests = {t: {"status": "idle", "message": ""} for t in self.tids}
         self.active = None
         self.stop_flag = False
         self.version = 0
@@ -128,15 +154,15 @@ class Bench:
         self._views = (-1, None)
         self._rngs = {}
         # Round = one more answer from every model at every effort (the "epoch").
-        self.bad = {k: deque(maxlen=8) for k in cfg["ranges"]}   # latest replies that were not number-only
-        self.history = {k: [] for k in cfg["ranges"]}
-        self._round_seen = {k: 0 for k in cfg["ranges"]}
+        self.bad = {t: deque(maxlen=8) for t in self.tids}   # latest replies that failed the quality check
+        self.history = {t: [] for t in self.tids}
+        self._round_seen = {t: 0 for t in self.tids}
         self._load()
         self._out = open(self.results_path, "a", encoding="utf-8")
         self._detail = {}
         self._detail_empty = {}
-        for k in cfg["ranges"]:
-            self.tests[k]["status"] = self._rest_status(k)
+        for t in self.tids:
+            self.tests[t]["status"] = self._rest_status(t)
 
     # ------------------------------------------------------------ persistence
 
@@ -149,13 +175,15 @@ class Bench:
                     row = json.loads(line)
                 except ValueError:
                     continue  # a half-written last line after a crash
+                # rows of the language-model tests carry only their range; decision rows name their test
+                tid = row.get("test") or str(row.get("range"))
                 p = self.providers.get(row.get("provider"))
                 if p:
                     p["spent"] += row.get("cost", 0.0)
-                    if row.get("range") in p["spent_by"]:
-                        p["spent_by"][row["range"]] += row.get("cost", 0.0)
+                    if tid in p["spent_by"]:
+                        p["spent_by"][tid] += row.get("cost", 0.0)
                 cell = self.by_key.get((row.get("provider"), row.get("model"), row.get("effort"),
-                                        row.get("range"), row.get("prompt_id")))
+                                        tid, row.get("prompt_id")))
                 if cell:
                     self._apply(cell, row)
 
@@ -170,18 +198,24 @@ class Bench:
             cell.counts[n] = cell.counts.get(n, 0) + 1
         else:
             cell.invalid += 1
+        probs = row.get("probs")
+        if probs and len(probs) == cell.k:
+            for i, pr in enumerate(probs):
+                cell.psum[i] += pr
+            cell.pn += 1
+            cell.conf += row.get("conf") or 0.0
         if not cell.control and row.get("reason") != "ok":
             if row.get("valid"):
                 cell.extra += 1
-            self.bad[cell.k].appendleft({"label": cell.label, "effort": cell.effort,
-                                         "text": str(row.get("output", ""))[:80], "kind": row.get("reason")})
+            self.bad[cell.tid].appendleft({"label": cell.label, "effort": cell.effort,
+                                           "text": str(row.get("output", ""))[:80], "kind": row.get("reason")})
         if not cell.control and cell.prompt_id == "main":
-            self._tick(cell.k)
+            self._tick(cell.tid)
 
-    def _round(self, k):
-        """Rounds completed in test k: the answer count of its slowest cell.
+    def _round(self, tid):
+        """Rounds completed in a test: the answer count of its slowest cell.
         Providers that have not run and skipped models do not hold it back."""
-        cells = [c for c in self.cells if c.k == k and not c.control and c.prompt_id == "main"]
+        cells = [c for c in self.cells if c.tid == tid and not c.control and c.prompt_id == "main"]
         top = {}
         for c in cells:
             top[c.provider] = max(top.get(c.provider, 0), c.done)
@@ -189,17 +223,18 @@ class Bench:
                 if top[c.provider] > 0 and not (c.done == 0 and top[c.provider] > 3)]
         return min(live) if live else 0
 
-    def _tick(self, k):
+    def _tick(self, tid):
         """Log one line of metrics each time a round completes, like a training epoch."""
-        r = self._round(k)
-        if r <= self._round_seen[k]:
+        r = self._round(tid)
+        if r <= self._round_seen[tid]:
             return
-        self._round_seen[k] = r
+        self._round_seen[tid] = r
+        k = self.tdef[tid]["k"]
         size = max(1, -(-k // 100))
         fam_counts, model_counts = {}, {}
         calls, spent = 0, 0.0
         for c in self.cells:
-            if c.k != k or c.control:
+            if c.tid != tid or c.control:
                 continue
             calls += c.done
             spent += c.cost
@@ -218,7 +253,7 @@ class Bench:
                 d = stats.jsd(model_counts[keys[i]], model_counts[keys[j]])
                 (within if keys[i][0] == keys[j][0] else between).append(d)
         mean = lambda xs: sum(xs) / len(xs) if xs else None
-        self.history[k].append({
+        self.history[tid].append({
             "round": r, "calls": calls, "spent": spent,
             "spread": {f: stats.cell_stats(cnt, k).get("entropy") for f, cnt in fam_counts.items()},
             "within": mean(within), "between": mean(between),
@@ -235,8 +270,8 @@ class Bench:
 
     # ------------------------------------------------------------ per-test call log
 
-    def detail_path(self, k):
-        return os.path.join(self.data_dir, "test_1-%d.json" % k)
+    def detail_path(self, tid):
+        return os.path.join(self.data_dir, self.tdef[tid]["file"])
 
     def _append_detail(self, k, record):
         """Append one call to that test's JSON file, keeping it a valid JSON array
@@ -273,21 +308,22 @@ class Bench:
 
     def _remaining(self, k, pid=None, api_only=False):
         return sum(max(0, c.target - c.done) for c in self.cells
-                   if c.k == k and (pid is None or c.provider == pid) and not (api_only and c.control))
+                   if c.tid == k and (pid is None or c.provider == pid) and not (api_only and c.control))
 
     def _rest_status(self, k):
         if self._remaining(k) == 0:
             return "done"
-        return "paused" if any(c.done for c in self.cells if c.k == k and not c.control) else "idle"
+        return "paused" if any(c.done for c in self.cells if c.tid == k and not c.control) else "idle"
 
     def _limit(self, pid, k):
         """How far this provider's total spend may go while test k runs: the cap,
-        minus an equal share held back for each other test that is not finished."""
+        minus an equal share held back for each other test of its own that is not finished."""
         p = self.providers[pid]
         if pid == "local":
             return float("inf")
-        share = p["cap"] / len(self.cfg["ranges"])
-        held = sum(max(0.0, share - p["spent_by"][o]) for o in self.cfg["ranges"]
+        mine = [t for t in self.tids if any(c.provider == pid and c.tid == t for c in self.cells)]
+        share = p["cap"] / max(1, len(mine))
+        held = sum(max(0.0, share - p["spent_by"][o]) for o in mine
                    if o != k and self._remaining(o, pid) > 0)
         return p["cap"] - held
 
@@ -317,7 +353,8 @@ class Bench:
                         p["state"] = "no key"
                         continue
                     try:
-                        client = providers.make_openai(key) if pid == "openai" else providers.make_anthropic(key)
+                        client = (providers.make_openai(key) if pid == "openai" else
+                                  providers.make_jev(key) if pid == "typesafe" else providers.make_anthropic(key))
                     except ImportError:
                         p["state"] = "error: SDK not installed, start with the .command file"
                         continue
@@ -387,13 +424,13 @@ class Bench:
                 return None, 0.5
             best = None
             for c in self.cells:
-                if c.provider != pid or c.k != k or c.disabled or c.done + c.inflight >= c.target:
+                if c.provider != pid or c.tid != k or c.disabled or c.done + c.inflight >= c.target:
                     continue
                 if best is None or c.done + c.inflight < best.done + best.inflight:
                     best = c
             if best is None:
                 if p["inflight"] == 0:
-                    skipped = any(c.disabled for c in self.cells if c.provider == pid and c.k == k)
+                    skipped = any(c.disabled for c in self.cells if c.provider == pid and c.tid == k)
                     p["state"] = "done, some skipped" if skipped else "done"
                     p["stopped"] = True
                     return None, 0
@@ -416,17 +453,26 @@ class Bench:
                     time.sleep(wait)
                     continue
                 return
-            prompt = self.cfg["prompts"][cell.prompt_id].format(max=cell.k)
+            test = self.tdef[cell.tid]
+            prompt = test["prompts"][cell.prompt_id].format(max=cell.k)
             started = time.time()
             try:
                 if pid == "local":
                     res = self._local_draw(cell)
+                elif cell.suite == "decisions":
+                    # no reasoning effort here: cell.effort is the order the options are listed in
+                    if self.demo:
+                        res = providers.call_demo_decision(cell.family, cell.model, cell.effort, cell.k, rng)
+                    else:
+                        options = providers.decision_options(cell.k, cell.effort, rng)
+                        call = providers.call_openai_decision if pid == "openai" else providers.call_jev
+                        res = call(client, cell.api_model, prompt, options, test["state"])
                 elif self.demo:
                     res = providers.call_demo(cell.family, cell.model, cell.effort, cell.k, rng)
                 elif pid == "openai":
-                    res = providers.call_openai(client, cell.model, cell.effort, prompt, self.cfg["max_output_tokens"])
+                    res = providers.call_openai(client, cell.api_model, cell.effort, prompt, self.cfg["max_output_tokens"])
                 else:
-                    res = providers.call_anthropic(client, cell.model, cell.effort, prompt, self.cfg["max_output_tokens"])
+                    res = providers.call_anthropic(client, cell.api_model, cell.effort, prompt, self.cfg["max_output_tokens"])
             except providers.Fatal as e:
                 with self.lock:
                     self._release(cell)
@@ -478,7 +524,10 @@ class Bench:
             call = "random.Random(seed).randint(1, %d)" % cell.k
             rng = self._rngs.get(cell.key)
             if rng is None:
-                rng = random.Random("%s|%s|%s|%d" % (self.cfg.get("baseline_seed", 0), cell.model, cell.effort, cell.k))
+                seed = "%s|%s|%s|%d" % (self.cfg.get("baseline_seed", 0), cell.model, cell.effort, cell.k)
+                if cell.suite != "llm":
+                    seed += "|" + cell.tid       # its own draws, not a copy of the language-model test's
+                rng = random.Random(seed)
                 for _ in range(cell.done):
                     rng.randint(1, cell.k)
                 self._rngs[cell.key] = rng
@@ -488,6 +537,8 @@ class Bench:
 
     def _record(self, cell, res, latency, prompt):
         number, reason = providers.parse_answer(res["text"], cell.k)
+        if reason == "ok" and res.get("flag"):
+            reason = res["flag"]      # a valid pick, but e.g. the returned probabilities were incomplete
         stop = str(res["stop"])
         if (number is None and stop in ("refusal", "max_tokens")) or stop.startswith("incomplete"):
             reason = stop  # refused or cut off: never count a partial answer
@@ -504,13 +555,19 @@ class Bench:
         }
         if reason != "ok":
             row["output"] = res["text"][:200]   # keep what was actually said when the check fails
+        decision = cell.suite == "decisions" and not cell.control
+        if cell.suite != "llm":
+            row["test"] = cell.tid              # language-model rows are identified by their range alone
+        if decision and res.get("probs"):
+            row["probs"] = [round(res["probs"].get(str(n), 0.0), 5) for n in range(1, cell.k + 1)]
+            row["conf"] = res.get("confidence")
         # test_1-K.json holds the full call: what was sent, the reasoning, what came back
         detail = {
             "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)),
-            "test": "1-%d" % cell.k,
+            "test": self.tdef[cell.tid]["name"],
             "provider": cell.provider, "family": cell.family,
             "model": cell.model, "served_model": res["served_model"],
-            "reasoning_effort": None if cell.control else cell.effort,
+            "reasoning_effort": None if cell.control or decision else cell.effort,
             "run": cell.effort if cell.control else None,
             "prompt_id": cell.prompt_id,
             "input": prompt,
@@ -521,15 +578,19 @@ class Bench:
             "number": number, "valid": number is not None, "number_only": reason == "ok", "reason": reason,
             "usage": res.get("usage"), "cost_usd": cost, "latency_s": round(latency, 3), "stop": stop,
         }
+        if decision:
+            # what a decision model returns instead of text: the pick, a probability per option, a confidence
+            detail.update({"api": "decisions", "option_order": cell.effort, "options_sent": res.get("options"),
+                           "probabilities": res.get("probs"), "confidence": res.get("confidence")})
         with self.lock:
             p = self.providers[cell.provider]
-            self._append_detail(cell.k, detail)
+            self._append_detail(cell.tid, detail)
             self._out.write(json.dumps(row) + "\n")
             self._out.flush()
             self._release(cell)
             self._apply(cell, row)
             p["spent"] += cost
-            p["spent_by"][cell.k] += cost
+            p["spent_by"][cell.tid] += cost
             p["max_cost"] = max(p["max_cost"], cost)
             p["streak"] = 0
             if p["state"] == "rate limited, retrying":
@@ -538,6 +599,7 @@ class Bench:
                 self.done_times.append(now)
             if cell.prompt_id == "main" and not cell.control:
                 self.recent.appendleft({"t": row["ts"], "label": cell.label, "effort": cell.effort, "k": cell.k,
+                                        "test": self.tdef[cell.tid]["label"],
                                         "text": str(number) if number is not None else res["text"].strip()[:40],
                                         "valid": row["valid"]})
             self.version += 1
@@ -547,7 +609,9 @@ class Bench:
     def _projected(self, pid, k):
         """Spend on test k so far plus its remaining calls at each cell's own average
         cost (falling back to the same model and effort in other tests)."""
-        cells = [c for c in self.cells if c.provider == pid]
+        # only cells of the same kind of test: a decision call costs far less than a language-model call
+        suite = self.tdef[k]["suite"]
+        cells = [c for c in self.cells if c.provider == pid and c.suite == suite]
         done = sum(c.done for c in cells)
         if not done:
             return None
@@ -559,7 +623,7 @@ class Bench:
             agg[1] += c.done
         total = self.providers[pid]["spent_by"][k]
         for c in cells:
-            if c.disabled or c.k != k:
+            if c.disabled or c.tid != k:
                 continue
             cost, n = by_model[(c.model, c.effort)]
             avg = c.cost / c.done if c.done else (cost / n if n else fallback)
@@ -574,21 +638,29 @@ class Bench:
     def _build_views(self):
         views = {}
         main = [c for c in self.cells if c.prompt_id == "main"]
-        for k in self.cfg["ranges"]:
+        for test in self.test_defs:
+            tid, k = test["id"], test["k"]
             mean, sd = stats.uniform_mean_sd(k)
             size = max(1, -(-k // 100))
+            in_test = [m for m in self.cfg["models"] if m.get("control") or m.get("suite", "llm") == test["suite"]]
             families, pooled_by_model, model_meta = [], [], []
-            for fam in dict.fromkeys(m["family"] for m in self.cfg["models"]):
+            for fam in dict.fromkeys(m["family"] for m in in_test):
                 fam_counts, models = {}, []
-                for m in self.cfg["models"]:
+                for m in in_test:
                     if m["family"] != fam:
                         continue
                     rows, m_counts = [], {}
+                    m_psum, m_pn = [0.0] * k, 0
                     for c in main:
-                        if c.model != m["id"] or c.k != k:
+                        if c.model != m["id"] or c.tid != tid:
                             continue
                         r = self._row(c.counts, k, c.done, c.target, c.invalid, c.disabled)
                         r["effort"] = c.effort
+                        if c.pn:    # decision models: the average probability reported for each number
+                            r["probs"] = [x / c.pn for x in c.psum]
+                            r["conf"] = c.conf / c.pn
+                            m_psum = [a + b for a, b in zip(m_psum, c.psum)]
+                            m_pn += c.pn
                         if c.lats:
                             lats = sorted(c.lats)
                             r["time"] = {"median": lats[len(lats) // 2], "p90": lats[min(len(lats) - 1, int(len(lats) * 0.9))]}
@@ -600,12 +672,13 @@ class Bench:
                     # the same question in each wording, all at the rewording-check effort
                     wording = []
                     for c in self.cells:
-                        if c.model == m["id"] and c.k == k and not c.control and c.effort == self.cfg.get("paraphrase_effort"):
+                        if c.model == m["id"] and c.tid == tid and not c.control and c.effort == test["para_effort"]:
                             w = self._row(c.counts, k, c.done, c.target, c.invalid, c.disabled)
                             w["prompt_id"] = c.prompt_id
                             wording.append(w)
                     models.append({"id": m["id"], "label": m.get("label", m["id"]), "rows": rows,
-                                   "pooled": self._row(m_counts, k), "wording": wording})
+                                   "pooled": self._row(m_counts, k), "wording": wording,
+                                   "probs": [x / m_pn for x in m_psum] if m_pn else None})
                     pooled_by_model.append(m_counts)
                     model_meta.append((m.get("label", m["id"]), fam, bool(m.get("control"))))
                 families.append({"family": fam, "control": all(c for _, f, c in model_meta if f == fam),
@@ -645,7 +718,11 @@ class Bench:
             def noise(mat):  # distance between two truly random samplers: the sampling-noise floor
                 vals = [mat[i][j] for i in range(n) for j in range(i + 1, n) if ctrl[i] and ctrl[j] and mat[i][j] is not None]
                 return sum(vals) / len(vals) if vals else None
-            views[str(k)] = {
+            views[tid] = {
+                "id": tid, "suite": test["suite"], "label": test["label"],
+                "prompts": test["prompts"],
+                "samples": {"main": self.cfg["samples_per_cell"], "para": self.cfg["paraphrase_samples"],
+                            "para_effort": test["para_effort"]},
                 "k": k, "bin_size": size, "uniform": {"mean": mean, "sd": sd},
                 "families": families,
                 "llm": dict(self._row(llm_counts, k),
@@ -668,13 +745,15 @@ class Bench:
             span = max(1.0, min(60.0, now - self.run_started)) if self.run_started else 60.0
             rate = len(window) / span if self.active is not None else 0.0
             tests = []
-            for k in self.cfg["ranges"]:
-                api = [c for c in self.cells if c.k == k and not c.control]
+            for test in self.test_defs:
+                k = test["id"]
+                api = [c for c in self.cells if c.tid == k and not c.control]
                 runnable = sum(max(0, c.target - c.done) for c in api
                                if not c.disabled and not self.providers[c.provider]["stopped"])
                 live = k == self.active
                 tests.append({
-                    "k": k, "status": self.tests[k]["status"], "message": self.tests[k]["message"],
+                    "id": k, "k": test["k"], "suite": test["suite"], "label": test["label"],
+                    "status": self.tests[k]["status"], "message": self.tests[k]["message"],
                     "done": sum(c.done for c in api), "target": sum(c.target for c in api),
                     "per_min": rate * 60 if live else 0,
                     "eta_s": (runnable / rate) if live and rate > 0 else None,
@@ -693,9 +772,9 @@ class Bench:
                 if pid == "local":
                     continue  # free and instant: not shown as an API provider
                 by_test = {}
-                for k in self.cfg["ranges"]:
-                    cells = [c for c in self.cells if c.provider == pid and c.k == k]
-                    by_test[str(k)] = {"spent": p["spent_by"][k], "projected": self._projected(pid, k),
+                for k in self.tids:
+                    cells = [c for c in self.cells if c.provider == pid and c.tid == k]
+                    by_test[k] = {"spent": p["spent_by"][k], "projected": self._projected(pid, k),
                                        "done": sum(c.done for c in cells), "target": sum(c.target for c in cells)}
                 provs.append({
                     "id": pid, "name": PROVIDER_NAMES.get(pid, pid),
@@ -704,12 +783,9 @@ class Bench:
                 })
             return {
                 "demo": self.demo, "version": self.version, "active": self.active, "tests": tests,
-                "providers": provs, "ranges": self.cfg["ranges"], "views": self._views[1],
+                "providers": provs, "views": self._views[1],
                 "recent": list(self.recent)[:14], "issues": list(self.issues),
                 "data_file": os.path.relpath(self.results_path, ROOT),
-                "prompts": self.cfg["prompts"],
-                "samples": {"main": self.cfg["samples_per_cell"], "para": self.cfg["paraphrase_samples"],
-                            "para_effort": self.cfg.get("paraphrase_effort")},
             }
 
     def export_csv(self):
@@ -717,7 +793,8 @@ class Bench:
         w = csv.writer(buf)
         w.writerow(["provider", "family", "model", "effort", "range", "prompt_id", "n_valid", "n_invalid",
                     "mean", "sd", "uniform_mean", "uniform_sd", "mode", "mode_share", "distinct_values",
-                    "entropy_norm", "entropy_uniform_ref_at_n", "chi2", "chi2_p", "cost_usd", "avg_output_tokens"])
+                    "entropy_norm", "entropy_uniform_ref_at_n", "chi2", "chi2_p", "cost_usd", "avg_output_tokens",
+                    "test"])
         with self.lock:
             for c in self.cells:
                 s = stats.cell_stats(c.counts, c.k)
@@ -726,7 +803,8 @@ class Bench:
                 w.writerow([c.provider, c.family, c.model, c.effort, c.k, c.prompt_id, s["n"], c.invalid,
                             g("mean"), g("sd"), um, usd, g("mode"), g("mode_share"), g("distinct"),
                             g("entropy"), g("entropy_ref"), g("chi2"), g("chi2_p"),
-                            round(c.cost, 6), round(c.out_tok / c.done, 1) if c.done else ""])
+                            round(c.cost, 6), round(c.out_tok / c.done, 1) if c.done else "",
+                            self.tdef[c.tid]["name"]])
         return buf.getvalue()
 
 
@@ -768,10 +846,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, "forbidden", "text/plain")
         path, _, query = self.path.partition("?")
         if path == "/api/run":
-            try:
-                self.bench.start(int(query.split("range=")[1].split("&")[0]))
-            except (IndexError, ValueError):
-                return self._send(400, "range is required", "text/plain")
+            params = dict(part.split("=", 1) for part in query.split("&") if "=" in part)
+            tid = params.get("test") or params.get("range")
+            if tid not in self.bench.tests:
+                return self._send(400, "unknown test", "text/plain")
+            self.bench.start(tid)
         elif path == "/api/pause":
             self.bench.pause()
         else:

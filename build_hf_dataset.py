@@ -43,7 +43,10 @@ def main():
         shutil.rmtree(OUT)                     # derived folder only; data/ is never touched
     os.makedirs(os.path.join(OUT, "calls"))
     splits = []
-    for path in sorted(glob.glob(os.path.join(ROOT, "data", "test_1-*.json")), key=lambda p: int(p.rsplit("-", 1)[1][:-5])):
+    # The language-model tests only (test_1-10.json, ...). The decision-API test has
+    # different columns (option order, probabilities) and is not part of this config yet.
+    paths = [p for p in glob.glob(os.path.join(ROOT, "data", "test_1-*.json")) if os.path.basename(p)[7:-5].isdigit()]
+    for path in sorted(paths, key=lambda p: int(os.path.basename(p)[7:-5])):
         with open(path, encoding="utf-8") as f:
             records = json.load(f)
         if not records:
@@ -57,7 +60,8 @@ def main():
     # summary: only rows that have answers
     with open(os.path.join(ROOT, "results", "summary.csv"), encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    kept = [r for r in rows if int(r["n_valid"] or 0) + int(r["n_invalid"] or 0) > 0]
+    kept = [r for r in rows if int(r["n_valid"] or 0) + int(r["n_invalid"] or 0) > 0
+            and not (r.get("test") or "").endswith("decisions")]
     with open(os.path.join(OUT, "summary.csv"), "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
